@@ -124,10 +124,13 @@ class PolygonFlowProvider(FlowProvider):
         if volume <= 0 or details.get("contract_type") not in ("call", "put"):
             return None
 
-        # Unusual = today's volume swamps existing open interest.
+        # Unusual = today's volume swamps existing open interest. With zero OI
+        # the ratio is undefined (treat as maximally unusual for the threshold),
+        # but we store None — JSON/Postgres can't represent infinity.
         vol_oi = volume / oi if oi else float("inf")
         if vol_oi < settings.flow_min_vol_oi:
             return None
+        stored_vol_oi = vol_oi if oi else None
 
         opt_ticker = details.get("ticker") or c.get("ticker", "")
         prev = self._seen_vol.get(opt_ticker, 0)
@@ -155,8 +158,8 @@ class PolygonFlowProvider(FlowProvider):
             is_spread=False, premium=premium, size=delta, spot=spot,
             iv=float(iv) if iv is not None else None,
             open_interest=int(oi) if oi else None,
-            vol_oi=vol_oi if oi else None,
-            observed_at=datetime.now(timezone.utc), raw={"vol_oi": vol_oi, "oi": oi},
+            vol_oi=stored_vol_oi,
+            observed_at=datetime.now(timezone.utc), raw={"vol_oi": stored_vol_oi, "oi": oi},
         )
 
     async def stream(self) -> AsyncIterator[FlowEvent]:
