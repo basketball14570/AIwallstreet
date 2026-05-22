@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     alert_classifications: str = "Potential Explosion Setup,Strong Momentum Setup"
     # Only alert on out-of-the-money calls; puts may alert at any moneyness.
     alert_calls_otm_only: bool = True
+    # Screener gates (all default to "off" so behaviour is unchanged unless set):
+    # Require the contract's day-volume to exceed open interest (a freshly
+    # opened position, not a close-out) before alerting.
+    alert_require_opening: bool = False
+    # Reject alerts whose IV-rank exceeds this (i.e. don't chase richly-priced
+    # vol). 1.0 disables the gate. IV-rank 0.5 means "unknown".
+    alert_max_iv_rank: float = 1.0
+    # For multi-leg flow, only alert when the structure is bullish (call
+    # vertical / risk reversal); skip neutral/hedge structures.
+    alert_bullish_structures_only: bool = False
     env: str = "dev"
     log_level: str = "INFO"
 

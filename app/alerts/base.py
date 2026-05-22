@@ -8,7 +8,7 @@ from app.alerts.summary import generate_summary
 from app.alerts.telegram import TelegramAlerter
 from app.config import settings
 from app.core.logging import get_logger
-from app.schemas.flow import ContractType, FlowEvent, ScoreResult
+from app.schemas.flow import ContractType, FlowEvent, FlowFeatureVector, ScoreResult
 
 log = get_logger("alerts")
 
@@ -28,7 +28,8 @@ class AlertDispatcher:
             c.strip() for c in settings.alert_classifications.split(",") if c.strip()
         }
 
-    def should_alert(self, result: ScoreResult, event: FlowEvent | None = None) -> bool:
+    def should_alert(self, result: ScoreResult, event: FlowEvent | None = None,
+                     features: FlowFeatureVector | None = None) -> bool:
         if result.confidence < settings.alert_min_confidence:
             return False
         if self._allowed and result.classification.value not in self._allowed:
@@ -37,6 +38,16 @@ class AlertDispatcher:
         if (settings.alert_calls_otm_only and event is not None
                 and event.contract_type == ContractType.CALL
                 and not _is_otm_call(event)):
+            return False
+        # Screener gates (feature-derived). Skipped when features aren't passed.
+        if features is not None:
+            if settings.alert_require_opening and not features.is_opening:
+                return False
+            if features.iv_rank > settings.alert_max_iv_rank:
+                return False
+        # Multi-leg gate: only alert bullish structures when configured.
+        if (settings.alert_bullish_structures_only and event is not None
+                and event.is_spread and not event.is_bullish_structure):
             return False
         return True
 

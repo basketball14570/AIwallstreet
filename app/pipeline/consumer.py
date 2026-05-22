@@ -62,7 +62,7 @@ class BatchWriter:
     def __len__(self) -> int:
         return len(self._buf)
 
-    async def flush(self) -> list[tuple[int, FlowEvent, ScoreResult]]:
+    async def flush(self) -> list[tuple[int, FlowEvent, FlowFeatureVector, ScoreResult]]:
         if not self._buf:
             return []
         batch, self._buf = self._buf, []
@@ -95,7 +95,7 @@ class BatchWriter:
                     model_version=res.model_version,
                 ))
             await session.commit()
-            return [(raw.id, e, res) for raw, (e, _, res) in zip(raws, batch)]
+            return [(raw.id, e, feats, res) for raw, (e, feats, res) in zip(raws, batch)]
 
 
 class ScoringConsumer:
@@ -114,9 +114,9 @@ class ScoringConsumer:
 
     async def _flush(self) -> None:
         written = await self.writer.flush()
-        for flow_id, event, result in written:
+        for flow_id, event, features, result in written:
             await publish(FLOW_CHANNEL, flow_payload(flow_id, event, result))
-            if self.dispatcher.should_alert(result, event):
+            if self.dispatcher.should_alert(result, event, features):
                 channels = await self.dispatcher.dispatch(event, result)
                 await self._record_alert(flow_id, event, result, channels)
         if self._pending_ids:

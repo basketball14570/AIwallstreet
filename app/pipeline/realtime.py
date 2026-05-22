@@ -229,7 +229,7 @@ class Pipeline:
 
         await publish(FLOW_CHANNEL, flow_payload(flow_id, event, result))
 
-        if self.dispatcher.should_alert(result, event):
+        if self.dispatcher.should_alert(result, event, features):
             channels = await self.dispatcher.dispatch(event, result)
             await self._record_alert(flow_id, event, result, channels)
             log.info("ALERT", ticker=event.ticker,

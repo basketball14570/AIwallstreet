@@ -6,11 +6,16 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
+from app.alerts.base import AlertDispatcher
+from app.config import settings
 from app.pipeline.realtime import FollowThroughTracker, IVRankTracker
 from app.schemas.flow import (
+    Classification,
     ContractType,
     FlowEvent,
+    FlowFeatureVector,
     MarketContext,
+    ScoreResult,
     Side,
     Structure,
 )
@@ -134,6 +139,55 @@ def test_shrink_hit_rate_pulls_small_samples_to_global():
     assert shrink_hit_rate(1, 1, global_rate=0.1) < 0.5
     # Large sample converges to the raw rate.
     assert abs(shrink_hit_rate(800, 1000, global_rate=0.1) - 0.8) < 0.05
+
+
+# ----- alert gating ---------------------------------------------------------
+def _passing_result() -> ScoreResult:
+    return ScoreResult(
+        classification=Classification.MOMENTUM, confidence=85.0,
+        explosion_prob=0.6, squeeze_prob=0.4, momentum_prob=0.8, fake_flow_prob=0.1,
+        component_scores={}, reasons=[],
+    )
+
+
+def _otm_call() -> FlowEvent:
+    return _event(strike=25.0, spot=20.0)  # OTM call so the existing gate passes
+
+
+def test_alert_passes_without_feature_gates():
+    d = AlertDispatcher()
+    assert d.should_alert(_passing_result(), _otm_call(),
+                          FlowFeatureVector(is_opening=True, iv_rank=0.3))
+
+
+def test_require_opening_gate(monkeypatch):
+    monkeypatch.setattr(settings, "alert_require_opening", True)
+    d = AlertDispatcher()
+    res, ev = _passing_result(), _otm_call()
+    assert not d.should_alert(res, ev, FlowFeatureVector(is_opening=False))
+    assert d.should_alert(res, ev, FlowFeatureVector(is_opening=True))
+    # No features => gate cannot apply, alert still passes.
+    assert d.should_alert(res, ev)
+
+
+def test_max_iv_rank_gate(monkeypatch):
+    monkeypatch.setattr(settings, "alert_max_iv_rank", 0.8)
+    d = AlertDispatcher()
+    res, ev = _passing_result(), _otm_call()
+    assert not d.should_alert(res, ev, FlowFeatureVector(iv_rank=0.95))
+    assert d.should_alert(res, ev, FlowFeatureVector(iv_rank=0.2))
+
+
+def test_bullish_structures_only_gate(monkeypatch):
+    monkeypatch.setattr(settings, "alert_bullish_structures_only", True)
+    d = AlertDispatcher()
+    res = _passing_result()
+    neutral = _event(strike=25.0, spot=20.0, is_spread=True, structure=Structure.CONDOR)
+    bullish = _event(strike=25.0, spot=20.0, is_spread=True, structure=Structure.CALL_VERTICAL)
+    single = _otm_call()  # not a spread -> unaffected by the gate
+    assert not d.should_alert(res, neutral)
+    assert d.should_alert(res, bullish)
+    assert d.should_alert(res, single)
 
 
 def test_build_ticker_priors_roundtrip(tmp_path):
