@@ -7,18 +7,24 @@ when no model is on disk, so the rules engine keeps working day one.
 """
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from app.ml.feature_engineering import FEATURE_COLUMNS, to_matrix
 from app.ml.train import MODEL_PATH
 from app.schemas.flow import FlowFeatureVector
 
+_RELOAD_INTERVAL = 30.0
+
 
 class ModelServer:
     _instance: "ModelServer | None" = None
+    _path = MODEL_PATH
+    _mtime: float | None = None
+    _checked: float = 0.0
 
     def __init__(self, path: Path = MODEL_PATH):
         bundle = None
@@ -31,8 +37,17 @@ class ModelServer:
 
     @classmethod
     def get(cls) -> "ModelServer":
-        if cls._instance is None:
-            cls._instance = cls()
+        """Singleton with mtime-based hot reload after a nightly retrain."""
+        now = time.monotonic()
+        if cls._instance is None or now - cls._checked >= _RELOAD_INTERVAL:
+            cls._checked = now
+            try:
+                m = os.path.getmtime(cls._path)
+            except OSError:
+                m = None
+            if cls._instance is None or m != cls._mtime:
+                cls._mtime = m
+                cls._instance = cls(cls._path)
         return cls._instance
 
     @property

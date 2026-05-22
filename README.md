@@ -150,6 +150,18 @@ human-readable `reasons` — that is the "explain WHY" output used in alerts.
 
 Run the demo (synthetic data, no DB needed): `python -m app.ml.train`.
 
+**Data flywheel** (`app/jobs/`): the system learns from its own history.
+* `jobs/backfill.py` — for flow old enough that the label horizon has elapsed,
+  fetch forward prices (`providers/prices.py`) and write triple-barrier
+  `outcome` rows. The explosion label = the **squeeze** definition (+20%/5d).
+* `jobs/retrain.py` — join `flow_features ⋈ outcome` to retrain the classifier,
+  rebuild the historical k-NN library, and refit the calibrator.
+* `jobs/nightly.py` — orchestrates backfill → retrain (`--loop N` or cron).
+
+Artifacts land in `models/`; the live engine **hot-reloads** them within ~30s
+(mtime-checked), so a retrain takes effect with no restart. Run offline against
+synthetic prices: `python -m app.jobs.nightly`.
+
 ---
 
 ## 7. Real-time processing flow

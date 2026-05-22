@@ -1,0 +1,59 @@
+"""Historical daily price provider for outcome backfill / labelling.
+
+Fetches daily closes from Polygon aggregates; falls back to a deterministic
+synthetic random walk (seeded per ticker) when no API key is set, so backfill
+and retraining run end-to-end offline.
+"""
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+
+import httpx
+import numpy as np
+import pandas as pd
+
+from app.config import settings
+from app.core.logging import get_logger
+from app.core.ratelimit import TokenBucket
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+log = get_logger("provider.prices")
+
+
+class PriceHistoryProvider:
+    def __init__(self, rate_per_min: float = 300):
+        self._bucket = TokenBucket(rate=rate_per_min / 60.0, capacity=rate_per_min / 6.0)
+
+    async def daily_closes(self, ticker: str, start: datetime, end: datetime) -> pd.Series:
+        """Daily close series indexed by date (tz-naive), inclusive."""
+        if not settings.polygon_api_key:
+            return _synthetic_closes(ticker, start, end)
+        return await self._fetch(ticker, start, end)
+
+    @retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=2, max=16))
+    async def _fetch(self, ticker: str, start: datetime, end: datetime) -> pd.Series:
+        await self._bucket.acquire()
+        url = (f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/"
+               f"{start:%Y-%m-%d}/{end:%Y-%m-%d}")
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(url, params={"adjusted": "true", "sort": "asc",
+                                                  "limit": 50000,
+                                                  "apiKey": settings.polygon_api_key})
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+        if not results:
+            return pd.Series(dtype=float)
+        idx = [pd.Timestamp(r["t"], unit="ms").normalize() for r in results]
+        return pd.Series([r["c"] for r in results], index=idx, name=ticker)
+
+
+def _synthetic_closes(ticker: str, start: datetime, end: datetime) -> pd.Series:
+    seed = abs(hash(ticker)) % (2**32)
+    rng = np.random.default_rng(seed)
+    days = pd.bdate_range(start.date(), end.date())
+    if len(days) == 0:
+        return pd.Series(dtype=float)
+    # Heavy-tailed daily returns so some tickers genuinely "explode".
+    rets = rng.standard_t(df=3, size=len(days)) * 0.03
+    price = 20.0 * np.exp(np.cumsum(rets))
+    return pd.Series(price, index=days, name=ticker)

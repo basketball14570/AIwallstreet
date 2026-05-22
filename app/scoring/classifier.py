@@ -5,6 +5,9 @@ the backtest, and the API.
 """
 from __future__ import annotations
 
+import os
+import time
+
 from app.schemas.flow import (
     Classification,
     FlowEvent,
@@ -17,19 +20,30 @@ from app.scoring.features import build_features
 
 _engine = ScoringEngine()
 
-# Optional historical k-NN library; populated lazily from disk if present.
+# Optional historical k-NN library; lazily loaded and hot-reloaded when the
+# nightly retrain rewrites the artifact (mtime-checked, throttled).
 _LIBRARY_PATH = "models/historical_library.npz"
+_RELOAD_INTERVAL = 30.0
+_UNSET = object()
 _library = None
-_library_loaded = False
+_lib_mtime = _UNSET
+_lib_checked = 0.0
 
 
 def _get_library():
-    global _library, _library_loaded
-    if not _library_loaded:
-        from app.scoring.similarity import HistoricalLibrary
+    global _library, _lib_mtime, _lib_checked
+    now = time.monotonic()
+    if now - _lib_checked >= _RELOAD_INTERVAL:
+        _lib_checked = now
+        try:
+            m = os.path.getmtime(_LIBRARY_PATH)
+        except OSError:
+            m = None
+        if m != _lib_mtime:
+            from app.scoring.similarity import HistoricalLibrary
 
-        _library = HistoricalLibrary.load(_LIBRARY_PATH)
-        _library_loaded = True
+            _lib_mtime = m
+            _library = HistoricalLibrary.load(_LIBRARY_PATH) if m else None
     return _library
 
 

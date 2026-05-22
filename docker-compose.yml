@@ -23,6 +23,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://flow:flow@db:5432/flow
       REDIS_URL: redis://redis:6379/0
     ports: ["8000:8000"]
+    volumes: ["models:/app/models"]
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}
@@ -34,9 +35,23 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://flow:flow@db:5432/flow
       REDIS_URL: redis://redis:6379/0
+    volumes: ["models:/app/models"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_started}
+
+  scheduler:
+    build: .
+    command: python -m app.jobs.nightly --loop 86400
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://flow:flow@db:5432/flow
+      REDIS_URL: redis://redis:6379/0
+    volumes: ["models:/app/models"]
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}
 
 volumes:
   pgdata:
+  models:
