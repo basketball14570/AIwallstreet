@@ -87,16 +87,20 @@ class PolygonFlowProvider(FlowProvider):
 
     async def _snapshot(self, client: httpx.AsyncClient, underlying: str) -> list[dict]:
         await self._bucket.acquire()
+        # NB: the options-snapshot endpoint only supports sort=ticker — passing
+        # sort=volume returns 400. We fetch up to the page max and sort by the
+        # day's volume client-side so the most active contracts come first.
         resp = await client.get(
             SNAPSHOT_URL.format(underlying=underlying),
-            params={"apiKey": settings.polygon_api_key, "limit": 250,
-                    "order": "desc", "sort": "volume"},
+            params={"apiKey": settings.polygon_api_key, "limit": 250},
             timeout=20,
         )
         if resp.status_code in (401, 403):
             raise PermissionError(resp.text[:200])
         resp.raise_for_status()
-        return resp.json().get("results", [])
+        results = resp.json().get("results", [])
+        results.sort(key=lambda c: (c.get("day") or {}).get("volume") or 0, reverse=True)
+        return results
 
     def _to_event(self, underlying: str, c: dict) -> FlowEvent | None:
         details = c.get("details", {})
