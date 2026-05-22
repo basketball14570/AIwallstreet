@@ -74,6 +74,7 @@ async def reclaim_stale(group: str, consumer: str, min_idle_ms: int = 60_000,
                         count: int = 100) -> list[tuple[str, dict]]:
     """Re-assign entries pending on dead consumers to this one (fault tolerance)."""
     r = get_redis()
+    await ensure_group(group)   # XAUTOCLAIM needs the group to exist first
     _cursor, entries, _ = await r.xautoclaim(
         STREAM, group, consumer, min_idle_time=min_idle_ms, count=count
     )

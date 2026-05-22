@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Side(str, Enum):
@@ -92,6 +92,8 @@ class FlowFeatureVector(BaseModel):
 
 
 class ScoreResult(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     classification: Classification
     confidence: float  # 0-100
     explosion_prob: float
