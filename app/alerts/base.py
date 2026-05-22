@@ -6,6 +6,7 @@ import asyncio
 from app.alerts.discord import DiscordAlerter
 from app.alerts.summary import generate_summary
 from app.alerts.telegram import TelegramAlerter
+from app.analysis.levels import levels_block
 from app.config import settings
 from app.core.logging import get_logger
 from app.schemas.flow import ContractType, FlowEvent, FlowFeatureVector, ScoreResult
@@ -56,6 +57,13 @@ class AlertDispatcher:
 
     async def dispatch(self, event: FlowEvent, result: ScoreResult) -> dict[str, str]:
         summary = generate_summary(event, result)
+        try:
+            block = await levels_block(event)
+        except Exception as exc:  # noqa: BLE001 — levels are best-effort
+            log.warning("levels lookup failed", ticker=event.ticker, error=str(exc))
+            block = ""
+        if block:
+            summary = f"{summary}\n\n{block}"
         results = await asyncio.gather(
             *(ch.send(summary, event, result) for ch in self.channels),
             return_exceptions=True,

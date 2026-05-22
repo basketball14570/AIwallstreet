@@ -46,6 +46,37 @@ class PriceHistoryProvider:
         idx = [pd.Timestamp(r["t"], unit="ms").normalize() for r in results]
         return pd.Series([r["c"] for r in results], index=idx, name=ticker)
 
+    async def daily_bars(self, ticker: str, start: datetime, end: datetime) -> pd.DataFrame:
+        """Daily OHLC bars indexed by date (tz-naive). Columns: open/high/low/close.
+        Falls back to a synthetic walk (with approximate intraday range) offline."""
+        if not settings.polygon_api_key:
+            closes = _synthetic_closes(ticker, start, end)
+            return pd.DataFrame({
+                "open": closes, "high": closes * 1.02,
+                "low": closes * 0.98, "close": closes,
+            })
+        return await self._fetch_bars(ticker, start, end)
+
+    @retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=2, max=16))
+    async def _fetch_bars(self, ticker: str, start: datetime, end: datetime) -> pd.DataFrame:
+        await self._bucket.acquire()
+        url = (f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/"
+               f"{start:%Y-%m-%d}/{end:%Y-%m-%d}")
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(url, params={"adjusted": "true", "sort": "asc",
+                                                  "limit": 50000,
+                                                  "apiKey": settings.polygon_api_key})
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+        if not results:
+            return pd.DataFrame(columns=["open", "high", "low", "close"])
+        idx = [pd.Timestamp(r["t"], unit="ms").normalize() for r in results]
+        return pd.DataFrame(
+            {"open": [r["o"] for r in results], "high": [r["h"] for r in results],
+             "low": [r["l"] for r in results], "close": [r["c"] for r in results]},
+            index=idx,
+        )
+
 
 def _synthetic_closes(ticker: str, start: datetime, end: datetime) -> pd.Series:
     seed = abs(hash(ticker)) % (2**32)

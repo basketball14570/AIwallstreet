@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import flow, watchlist, ws
+from app.api.routes import alerts, flow, watchlist, ws
 from app.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.db.base import init_db
@@ -36,6 +36,7 @@ app = FastAPI(title="AIwallstreet — Unusual Options Flow Intelligence",
 app.include_router(flow.router)
 app.include_router(watchlist.router)
 app.include_router(ws.router)
+app.include_router(alerts.router)
 
 _STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
