@@ -18,6 +18,7 @@ from app.schemas.flow import (
 from app.scoring.engine import ScoringEngine
 from app.scoring.features import build_features
 from app.scoring.regime import NEUTRAL, Regime
+from app.scoring.sequence import SequenceFeatures
 
 _engine = ScoringEngine()
 
@@ -117,6 +118,7 @@ def classify_features(
         fake_flow_prob=probs["fake_flow_prob"],
         component_scores=components.as_dict(),
         reasons=reasons,
+        regime=regime.name,
     )
 
 
@@ -125,8 +127,9 @@ def classify(
     ctx: MarketContext | None = None,
     repeated_sweeps: int = 0,
     regime: Regime = NEUTRAL,
+    seq: SequenceFeatures | None = None,
 ) -> tuple[FlowFeatureVector, ScoreResult]:
-    features = build_features(event, ctx, repeated_sweeps=repeated_sweeps)
+    features = build_features(event, ctx, repeated_sweeps=repeated_sweeps, seq=seq)
     analogs: list[tuple[str, float]] = []
     lib = _get_library()
     if lib is not None:

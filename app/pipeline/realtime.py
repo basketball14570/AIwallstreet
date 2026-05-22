@@ -21,6 +21,7 @@ from app.providers.regime import RegimeProvider
 from app.providers.unusual_whales import UnusualWhalesProvider
 from app.schemas.flow import FlowEvent, ScoreResult
 from app.scoring.classifier import classify
+from app.scoring.sequence import SequenceTracker
 
 log = get_logger("pipeline")
 
@@ -52,6 +53,7 @@ class Pipeline:
         self.context = PolygonContextProvider()
         self.dispatcher = AlertDispatcher()
         self.sweeps = SweepTracker()
+        self.sequences = SequenceTracker()
         self.regime_provider = RegimeProvider()
 
     async def _persist(self, event: FlowEvent, features, result: ScoreResult) -> int:
@@ -93,6 +95,7 @@ class Pipeline:
                 fake_flow_prob=result.fake_flow_prob,
                 component_scores=result.component_scores,
                 reasons={"reasons": result.reasons},
+                regime=result.regime,
                 model_version=result.model_version,
             ))
             await session.commit()
@@ -117,7 +120,9 @@ class Pipeline:
         ctx = await self.context.get_context(event.ticker)
         regime = await self.regime_provider.get_regime()
         repeated = self.sweeps.record(event)
-        features, result = classify(event, ctx, repeated_sweeps=repeated, regime=regime)
+        seq = self.sequences.record(event)
+        features, result = classify(event, ctx, repeated_sweeps=repeated,
+                                    regime=regime, seq=seq)
         flow_id = await self._persist(event, features, result)
 
         await publish(FLOW_CHANNEL, {

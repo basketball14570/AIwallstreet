@@ -18,6 +18,7 @@ from app.core.redis_client import FLOW_CHANNEL, publish
 from app.db.base import SessionLocal
 from app.db.models import Alert, FlowFeatures, FlowScore, RawFlow
 from app.pipeline.realtime import SweepTracker
+from app.scoring.sequence import SequenceTracker
 from app.providers.polygon import PolygonContextProvider
 from app.providers.regime import RegimeProvider
 from app.schemas.flow import FlowEvent, FlowFeatureVector, ScoreResult
@@ -83,7 +84,8 @@ class BatchWriter:
                     squeeze_prob=res.squeeze_prob, momentum_prob=res.momentum_prob,
                     fake_flow_prob=res.fake_flow_prob,
                     component_scores=res.component_scores,
-                    reasons={"reasons": res.reasons}, model_version=res.model_version,
+                    reasons={"reasons": res.reasons}, regime=res.regime,
+                    model_version=res.model_version,
                 ))
             await session.commit()
             return [(raw.id, e, res) for raw, (e, _, res) in zip(raws, batch)]
@@ -96,6 +98,7 @@ class ScoringConsumer:
         self.regime_provider = RegimeProvider()
         self.dispatcher = AlertDispatcher()
         self.sweeps = SweepTracker()
+        self.sequences = SequenceTracker()
         self.writer = BatchWriter()
         self._pending_ids: list[str] = []
         self._last_flush = time.monotonic()
@@ -131,7 +134,9 @@ class ScoringConsumer:
         ctx = await self.context.get_context(event.ticker)
         regime = await self.regime_provider.get_regime()
         repeated = self.sweeps.record(event)
-        features, result = classify(event, ctx, repeated_sweeps=repeated, regime=regime)
+        seq = self.sequences.record(event)
+        features, result = classify(event, ctx, repeated_sweeps=repeated,
+                                    regime=regime, seq=seq)
         self.writer.add(event, features, result)
         self._pending_ids.append(msg_id)
 

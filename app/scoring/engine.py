@@ -85,6 +85,8 @@ class ScoringEngine:
     def _conviction(self, f: FlowFeatureVector, c: Components) -> float:
         s = 0.45 * f.ask_side_ratio + 0.35 * f.sweep_urgency
         s += 0.20 * ramp(f.repeated_sweeps, 1, 5)
+        # Sequence corroboration (0 by default -> no effect on snapshot scoring).
+        s += 0.12 * clamp(f.seq_cadence_accel) + 0.08 * clamp(f.seq_strike_ladder)
         if f.at_midpoint:
             s *= 0.5
             c.reasons.append("Midpoint fill reduces directional conviction")
@@ -92,6 +94,10 @@ class ScoringEngine:
             c.reasons.append("Aggressive ask-side sweep — buyer paying up")
         if f.repeated_sweeps >= 3:
             c.reasons.append(f"{f.repeated_sweeps} repeated sweeps in window")
+        if f.seq_cadence_accel > 0.4:
+            c.reasons.append("Sweep cadence accelerating — order flow intensifying")
+        if f.seq_strike_ladder > 0.6:
+            c.reasons.append("Strikes laddering up — scaling into higher calls")
         return clamp(s)
 
     # ----- volume confirmation ---------------------------------------------

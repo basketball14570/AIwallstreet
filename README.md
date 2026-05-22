@@ -196,6 +196,23 @@ so this matters far more than overall win rate. `precision_by_confidence` gives
 the per-band calibration view (a healthy system shows precision rising
 monotonically with confidence).
 
+## 8c. Intra-event sequence layer
+
+`app/scoring/sequence.py` — single prints are weak; the *sequence* carries the
+edge. A rolling per-ticker `SequenceTracker` derives **cadence acceleration**
+(sweeps arriving faster), **strike laddering** (scaling into higher strikes over
+time), and **premium velocity**, feeding them into conviction and surfacing them
+as reasons. These are stored on `flow_features` and the full ordered sequence is
+reconstructable from `raw_flow`.
+
+`app/ml/sequences.py` assembles the canonical `(N, max_len, F)` right-aligned,
+zero-padded tensor + mask — the standard input for a future Temporal CNN / LSTM
+/ light transformer, trained on the raw progression rather than a snapshot. The
+data is being captured now so the model can be trained once volume accrues.
+
+The `flow_score.regime` column enables **regime-stratified backtests** (e.g.
+"what is high-confidence precision in `high_vol_squeeze` vs `low_vol_chop`?").
+
 ## 8b. Market-regime layer
 
 `app/scoring/regime.py` + `app/providers/regime.py`. The same flow means

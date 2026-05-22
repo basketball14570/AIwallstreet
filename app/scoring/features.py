@@ -14,6 +14,7 @@ from app.schemas.flow import (
     MarketContext,
     Side,
 )
+from app.scoring.sequence import SequenceFeatures
 
 
 def _dte(expiry: datetime, now: datetime | None = None) -> float:
@@ -49,10 +50,16 @@ def build_features(
     ctx: MarketContext | None,
     repeated_sweeps: int = 0,
     now: datetime | None = None,
+    seq: SequenceFeatures | None = None,
 ) -> FlowFeatureVector:
     ctx = ctx or MarketContext(ticker=event.ticker)
+    seq = seq or SequenceFeatures()
     ask_side_ratio = 1.0 if event.side == Side.ASK else (0.5 if event.side == Side.MID else 0.0)
     return FlowFeatureVector(
+        seq_cadence_accel=seq.cadence_accel,
+        seq_strike_ladder=seq.strike_ladder,
+        seq_premium_velocity=seq.premium_velocity,
+        seq_count=seq.count,
         ask_side_ratio=ask_side_ratio,
         sweep_urgency=_sweep_urgency(event),
         repeated_sweeps=repeated_sweeps,

@@ -83,6 +83,12 @@ class FlowFeatureVector(BaseModel):
     social_score: float = 0.0
     news_score: float = 0.0
     historical_similarity: float = 0.0
+    # Intra-event sequence features (per ticker, rolling window). Captured for
+    # temporal modelling and fed lightly into conviction today.
+    seq_cadence_accel: float = 0.0     # >0 => sweeps arriving faster
+    seq_strike_ladder: float = 0.0     # 0-1 => strikes laddering up over time
+    seq_premium_velocity: float = 0.0  # $ premium / second in window
+    seq_count: int = 0                 # events in the window
 
 
 class ScoreResult(BaseModel):
@@ -94,4 +100,5 @@ class ScoreResult(BaseModel):
     fake_flow_prob: float
     component_scores: dict[str, float]
     reasons: list[str]
+    regime: str = "neutral"
     model_version: str = "rules-0.1"

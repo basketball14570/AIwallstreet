@@ -110,6 +110,7 @@ class FlowScore(Base):
     fake_flow_prob: Mapped[float] = mapped_column(Float)
     component_scores: Mapped[dict] = mapped_column(JSONB, default=dict)
     reasons: Mapped[dict] = mapped_column(JSONB, default=dict)
+    regime: Mapped[str] = mapped_column(String(40), default="neutral", index=True)
     model_version: Mapped[str] = mapped_column(String(40), default="rules-0.1")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
