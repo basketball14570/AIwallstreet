@@ -43,7 +43,10 @@ class AlertDispatcher:
         if features is not None:
             if settings.alert_require_opening and not features.is_opening:
                 return False
-            if features.iv_rank > settings.alert_max_iv_rank:
+            # iv_rank == 0.5 is the "unknown" sentinel — exempt it so a missing
+            # IV never silently suppresses an alert.
+            if (features.iv_rank != 0.5
+                    and features.iv_rank > settings.alert_max_iv_rank):
                 return False
         # Multi-leg gate: only alert bullish structures when configured.
         if (settings.alert_bullish_structures_only and event is not None

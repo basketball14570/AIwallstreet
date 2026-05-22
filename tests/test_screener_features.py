@@ -178,6 +178,15 @@ def test_max_iv_rank_gate(monkeypatch):
     assert d.should_alert(res, ev, FlowFeatureVector(iv_rank=0.2))
 
 
+def test_max_iv_rank_gate_exempts_unknown(monkeypatch):
+    # Threshold below the 0.5 sentinel must NOT filter unknown-IV contracts.
+    monkeypatch.setattr(settings, "alert_max_iv_rank", 0.4)
+    d = AlertDispatcher()
+    res, ev = _passing_result(), _otm_call()
+    assert d.should_alert(res, ev, FlowFeatureVector(iv_rank=0.5))   # unknown -> exempt
+    assert not d.should_alert(res, ev, FlowFeatureVector(iv_rank=0.6))  # real, above cap
+
+
 def test_bullish_structures_only_gate(monkeypatch):
     monkeypatch.setattr(settings, "alert_bullish_structures_only", True)
     d = AlertDispatcher()
