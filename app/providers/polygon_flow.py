@@ -48,6 +48,42 @@ class PolygonFlowProvider(FlowProvider):
         self.tickers = [t.strip().upper() for t in settings.watch_tickers.split(",") if t.strip()]
         self._bucket = TokenBucket(rate=rate_per_min / 60.0, capacity=rate_per_min / 6.0)
         self._seen_vol: dict[str, int] = {}   # option ticker -> last day volume emitted
+        self._diagnosed = False               # one-time snapshot coverage report
+
+    def _diagnose(self, underlying: str, contracts: list[dict]) -> None:
+        """One-time report on what the live snapshot actually contains, so it's
+        obvious from the logs whether the plan returns the fields the screener
+        needs — especially last_quote/last_trade, without which the aggressor
+        side (bought vs sold) can't be inferred and conviction stays flat."""
+        self._diagnosed = True
+        n = len(contracts)
+        if not n:
+            log.warning("polygon snapshot empty — can't assess field coverage; "
+                        "retrying live during market hours is recommended",
+                        ticker=underlying)
+            return
+
+        def pct(pred) -> int:
+            return round(100 * sum(1 for c in contracts if pred(c)) / n)
+
+        has_quote = pct(lambda c: bool(c.get("last_quote")))
+        has_trade = pct(lambda c: bool(c.get("last_trade")))
+        has_iv = pct(lambda c: c.get("implied_volatility") is not None)
+        has_oi = pct(lambda c: bool(c.get("open_interest")))
+        log.info("polygon snapshot field coverage", ticker=underlying, contracts=n,
+                 last_quote_pct=has_quote, last_trade_pct=has_trade,
+                 implied_volatility_pct=has_iv, open_interest_pct=has_oi)
+        if has_oi == 0:
+            log.warning("no open_interest in snapshot — vol/OI 'unusual' detection "
+                        "will be meaningless; check your Polygon options entitlement")
+        if has_iv == 0:
+            log.warning("no implied_volatility in snapshot — IV-rank signal will stay "
+                        "neutral; check your Polygon options entitlement")
+        if has_quote == 0 and has_trade == 0:
+            log.warning("no last_quote/last_trade in snapshot — aggressor side "
+                        "(bought vs sold) can't be inferred, so conviction scores "
+                        "will be flat. This is expected off-hours; re-check during "
+                        "live market hours, else your tier may lack quotes/trades")
 
     async def _snapshot(self, client: httpx.AsyncClient, underlying: str) -> list[dict]:
         await self._bucket.acquire()
@@ -118,7 +154,10 @@ class PolygonFlowProvider(FlowProvider):
             while True:
                 for underlying in self.tickers:
                     try:
-                        for c in await self._snapshot(client, underlying):
+                        contracts = await self._snapshot(client, underlying)
+                        if not self._diagnosed:
+                            self._diagnose(underlying, contracts)
+                        for c in contracts:
                             ev = self._to_event(underlying, c)
                             if ev is not None:
                                 yield ev
