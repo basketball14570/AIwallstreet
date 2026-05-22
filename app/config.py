@@ -32,15 +32,18 @@ class Settings(BaseSettings):
     watch_tickers: str = "TSLA,NVDA,AAPL,AMD,PLTR,SOFI,GME,AMC,MARA,RIVN"
     polygon_flow_poll_sec: float = 30.0
     # Minimum day-volume/open-interest ratio for a contract to count as unusual.
-    flow_min_vol_oi: float = 0.8
+    # Lowered while testing so more flow surfaces; raise to tighten.
+    flow_min_vol_oi: float = 0.35
     # Minimum total premium ($) for a synthesised flow event.
-    flow_min_premium: float = 25_000.0
+    flow_min_premium: float = 10_000.0
 
     # Behaviour
     alert_min_confidence: float = 70.0
     # Which classifications may fire an alert. Comma-separated; blank = any.
     # Defaults to explosion + strong momentum setups only (skip routine/hedging).
     alert_classifications: str = "Potential Explosion Setup,Strong Momentum Setup"
+    # Only alert on out-of-the-money calls; puts may alert at any moneyness.
+    alert_calls_otm_only: bool = True
     env: str = "dev"
     log_level: str = "INFO"
 

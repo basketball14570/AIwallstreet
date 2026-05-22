@@ -8,9 +8,17 @@ from app.alerts.summary import generate_summary
 from app.alerts.telegram import TelegramAlerter
 from app.config import settings
 from app.core.logging import get_logger
-from app.schemas.flow import FlowEvent, ScoreResult
+from app.schemas.flow import ContractType, FlowEvent, ScoreResult
 
 log = get_logger("alerts")
+
+
+def _is_otm_call(event: FlowEvent) -> bool:
+    """True if a call's strike is above spot (out-of-the-money). Unknown spot
+    is treated as OTM so we don't silently drop alerts."""
+    if event.spot is None:
+        return True
+    return event.strike > event.spot
 
 
 class AlertDispatcher:
@@ -20,11 +28,17 @@ class AlertDispatcher:
             c.strip() for c in settings.alert_classifications.split(",") if c.strip()
         }
 
-    def should_alert(self, result: ScoreResult) -> bool:
+    def should_alert(self, result: ScoreResult, event: FlowEvent | None = None) -> bool:
         if result.confidence < settings.alert_min_confidence:
             return False
-        # Empty allow-list => alert on any classification.
-        return not self._allowed or result.classification.value in self._allowed
+        if self._allowed and result.classification.value not in self._allowed:
+            return False
+        # Only alert on out-of-the-money calls; puts are exempt from this rule.
+        if (settings.alert_calls_otm_only and event is not None
+                and event.contract_type == ContractType.CALL
+                and not _is_otm_call(event)):
+            return False
+        return True
 
     async def dispatch(self, event: FlowEvent, result: ScoreResult) -> dict[str, str]:
         summary = generate_summary(event, result)
