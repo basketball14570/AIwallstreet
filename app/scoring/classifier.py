@@ -41,6 +41,9 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 
 def _label(probs: dict[str, float], confidence: float) -> Classification:
+    # Hedging takes precedence over fake when the structure is clearly a hedge.
+    if probs.get("hedging_prob", 0.0) >= 0.6 and confidence < 50:
+        return Classification.HEDGING
     if probs["fake_flow_prob"] >= 0.6 and confidence < 50:
         return Classification.FAKE
     if probs["explosion_prob"] >= 0.7 and probs["squeeze_prob"] >= 0.5:
@@ -49,6 +52,8 @@ def _label(probs: dict[str, float], confidence: float) -> Classification:
         return Classification.MOMENTUM
     if confidence >= 50:
         return Classification.WATCHLIST
+    if probs.get("hedging_prob", 0.0) >= 0.5:
+        return Classification.INSTITUTIONAL
     if probs["fake_flow_prob"] >= 0.5:
         return Classification.HEDGING
     return Classification.NORMAL

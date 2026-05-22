@@ -99,8 +99,10 @@ migrations.
 | GET  | `/flow/recent` | recent scored flow, filter by `min_confidence` / `classification` |
 | GET/POST/DELETE | `/watchlist` | watchlist CRUD |
 | WS   | `/ws/flow` | live stream of scored flow (bridges Redis `flow.events`) |
+| GET  | `/` | live web dashboard (vanilla JS, no build step) |
 
-Interactive docs at `/docs` once running.
+Interactive docs at `/docs` once running. The dashboard at `/` streams scored
+flow over the WebSocket with confidence/classification filters and session stats.
 
 ---
 
@@ -179,7 +181,7 @@ docker compose up --build       # API :8000, worker, Postgres, Redis
 # Option B: local API + pipeline
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload   # API
+uvicorn app.main:app --reload   # API + dashboard at http://localhost:8000/
 python -m app.worker            # real-time pipeline (separate shell)
 
 # Tests

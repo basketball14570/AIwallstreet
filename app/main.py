@@ -6,10 +6,12 @@ Run pipeline worker: python -m app.worker
 """
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import flow, watchlist, ws
 from app.config import settings
@@ -35,7 +37,15 @@ app.include_router(flow.router)
 app.include_router(watchlist.router)
 app.include_router(ws.router)
 
+_STATIC = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "env": settings.env}
+
+
+@app.get("/")
+async def dashboard():
+    return FileResponse(_STATIC / "index.html")

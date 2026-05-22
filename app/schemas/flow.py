@@ -68,6 +68,9 @@ class FlowFeatureVector(BaseModel):
     sweep_urgency: float = 0.0
     repeated_sweeps: int = 0
     at_midpoint: bool = False
+    is_put: bool = False
+    is_spread: bool = False
+    premium: float = 0.0
     otm_pct: float = 0.0
     dte: float = 0.0
     rel_options_volume: float = 0.0

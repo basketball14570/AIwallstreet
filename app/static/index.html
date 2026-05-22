@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIwallstreet — Flow Intelligence</title>
+<style>
+  :root {
+    --bg:#0b0e14; --panel:#131722; --panel2:#1a2030; --line:#222c3d;
+    --txt:#d6deeb; --muted:#7a869e; --green:#26d07c; --amber:#f5a623;
+    --red:#ef4565; --blue:#4ea1ff; --purple:#a87ffb;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+         font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  header { display:flex; align-items:center; gap:16px; padding:14px 20px;
+           border-bottom:1px solid var(--line); background:var(--panel); }
+  header h1 { font-size:16px; margin:0; letter-spacing:.5px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--muted); }
+  .dot.live { background:var(--green); box-shadow:0 0 8px var(--green); }
+  .wrap { display:grid; grid-template-columns:340px 1fr; gap:16px; padding:16px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; }
+  .panel h2 { font-size:12px; text-transform:uppercase; letter-spacing:1px;
+              color:var(--muted); margin:0; padding:12px 14px; border-bottom:1px solid var(--line); }
+  .controls { padding:12px 14px; display:flex; flex-direction:column; gap:10px; }
+  label { font-size:12px; color:var(--muted); }
+  input,select { width:100%; background:var(--panel2); border:1px solid var(--line);
+                 color:var(--txt); border-radius:6px; padding:7px 9px; font:inherit; }
+  .stat { display:flex; justify-content:space-between; padding:8px 14px;
+          border-bottom:1px solid var(--line); }
+  .stat b { color:var(--blue); }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:8px 12px; border-bottom:1px solid var(--line);
+          white-space:nowrap; }
+  th { font-size:11px; text-transform:uppercase; color:var(--muted); position:sticky; top:0;
+       background:var(--panel); }
+  td.tk { font-weight:700; }
+  .pill { padding:2px 8px; border-radius:20px; font-size:11px; font-weight:700; }
+  .Normal,.Hedging { background:#1f2735; color:var(--muted); }
+  .Fake { background:#3a1d28; color:var(--red); }
+  .Watchlist { background:#1f2b3d; color:var(--blue); }
+  .Momentum { background:#2a2410; color:var(--amber); }
+  .Explosion { background:#103025; color:var(--green); }
+  .bar { height:6px; border-radius:4px; background:var(--panel2); overflow:hidden; width:90px; }
+  .bar > i { display:block; height:100%; background:var(--green); }
+  tr.flash { animation:flash 1.2s ease-out; }
+  @keyframes flash { from{background:#1c2740;} to{background:transparent;} }
+  .reasons { color:var(--muted); font-size:12px; white-space:normal; max-width:380px; }
+  .feed { max-height:calc(100vh - 220px); overflow:auto; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="status"></span>
+  <h1>AIwallstreet · Unusual Options Flow Intelligence</h1>
+  <span id="conn" style="color:var(--muted)">connecting…</span>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="panel">
+      <h2>Filters</h2>
+      <div class="controls">
+        <div>
+          <label>Min confidence: <span id="confVal">0</span></label>
+          <input type="range" id="minConf" min="0" max="100" value="0" />
+        </div>
+        <div>
+          <label>Classification</label>
+          <select id="classFilter">
+            <option value="">All</option>
+            <option>Potential Explosion Setup</option>
+            <option>Strong Momentum Setup</option>
+            <option>Watchlist Candidate</option>
+            <option>Hedging Flow</option>
+            <option>Fake / Low-Quality Flow</option>
+            <option>Normal Flow</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <h2>Session stats</h2>
+      <div class="stat"><span>Events seen</span><b id="sEvents">0</b></div>
+      <div class="stat"><span>Alerts (≥70)</span><b id="sAlerts">0</b></div>
+      <div class="stat"><span>Explosion setups</span><b id="sExpl">0</b></div>
+      <div class="stat"><span>Top ticker</span><b id="sTop">—</b></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Live scored flow</h2>
+    <div class="feed">
+      <table>
+        <thead><tr>
+          <th>Time</th><th>Ticker</th><th>Class</th><th>Conf</th>
+          <th>Explosion</th><th>Why</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const tbody = document.getElementById('rows');
+const stats = { events:0, alerts:0, expl:0, tickers:{} };
+let minConf = 0, classFilter = '';
+
+document.getElementById('minConf').addEventListener('input', e => {
+  minConf = +e.target.value; document.getElementById('confVal').textContent = minConf;
+  applyFilter();
+});
+document.getElementById('classFilter').addEventListener('change', e => {
+  classFilter = e.target.value; applyFilter();
+});
+
+function applyFilter() {
+  for (const tr of tbody.children) {
+    const c = +tr.dataset.conf, k = tr.dataset.class;
+    tr.style.display = (c >= minConf && (!classFilter || k === classFilter)) ? '' : 'none';
+  }
+}
+
+function shortClass(c){ return (c||'').split(' ')[0].replace('/',''); }
+
+function addRow(d) {
+  stats.events++;
+  if (d.confidence >= 70) stats.alerts++;
+  if (d.classification === 'Potential Explosion Setup') stats.expl++;
+  stats.tickers[d.ticker] = (stats.tickers[d.ticker]||0)+1;
+  document.getElementById('sEvents').textContent = stats.events;
+  document.getElementById('sAlerts').textContent = stats.alerts;
+  document.getElementById('sExpl').textContent = stats.expl;
+  const top = Object.entries(stats.tickers).sort((a,b)=>b[1]-a[1])[0];
+  document.getElementById('sTop').textContent = top ? `${top[0]} (${top[1]})` : '—';
+
+  const tr = document.createElement('tr');
+  tr.className = 'flash';
+  tr.dataset.conf = d.confidence; tr.dataset.class = d.classification;
+  const cls = shortClass(d.classification);
+  const expl = Math.round((d.explosion_prob||0)*100);
+  tr.innerHTML = `
+    <td>${new Date().toLocaleTimeString()}</td>
+    <td class="tk">${d.ticker}</td>
+    <td><span class="pill ${cls}">${d.classification}</span></td>
+    <td>${d.confidence.toFixed(0)}</td>
+    <td><div class="bar"><i style="width:${expl}%"></i></div></td>
+    <td class="reasons">${(d.reasons||[]).slice(0,3).join(' · ')}</td>`;
+  tbody.prepend(tr);
+  while (tbody.children.length > 200) tbody.removeChild(tbody.lastChild);
+  applyFilter();
+}
+
+async function loadRecent() {
+  try {
+    const r = await fetch('/flow/recent?limit=50');
+    const data = await r.json();
+    data.reverse().forEach(addRow);
+  } catch (e) { /* API may be empty on first boot */ }
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws/flow`);
+  ws.onopen = () => {
+    document.getElementById('status').classList.add('live');
+    document.getElementById('conn').textContent = 'live';
+  };
+  ws.onclose = () => {
+    document.getElementById('status').classList.remove('live');
+    document.getElementById('conn').textContent = 'reconnecting…';
+    setTimeout(connect, 2000);
+  };
+  ws.onmessage = ev => addRow(JSON.parse(ev.data));
+}
+
+loadRecent();
+connect();
+</script>
+</body>
+</html>
