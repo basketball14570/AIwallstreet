@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     # Tickers to scan for unusual options flow (Polygon provider).
     watch_tickers: str = "TSLA,NVDA,AAPL,AMD,PLTR,SOFI,GME,AMC,MARA,RIVN"
     polygon_flow_poll_sec: float = 30.0
+    # Max snapshot pages to pull per ticker per cycle (250 contracts/page). The
+    # endpoint can't sort by volume server-side, so we page the chain and keep
+    # the most active contracts client-side. Higher = fuller coverage, more API
+    # calls. 0/1 = single page.
+    polygon_flow_max_pages: int = 6
+    # Cap on contracts kept (by day volume) per ticker after paging.
+    polygon_flow_top_contracts: int = 250
     # Minimum day-volume/open-interest ratio for a contract to count as unusual.
     # Lowered while testing so more flow surfaces; raise to tighten.
     flow_min_vol_oi: float = 0.35

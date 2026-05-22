@@ -85,22 +85,34 @@ class PolygonFlowProvider(FlowProvider):
                         "will be flat. This is expected off-hours; re-check during "
                         "live market hours, else your tier may lack quotes/trades")
 
-    async def _snapshot(self, client: httpx.AsyncClient, underlying: str) -> list[dict]:
+    async def _get(self, client: httpx.AsyncClient, url: str, params: dict) -> dict:
         await self._bucket.acquire()
-        # NB: the options-snapshot endpoint only supports sort=ticker — passing
-        # sort=volume returns 400. We fetch up to the page max and sort by the
-        # day's volume client-side so the most active contracts come first.
-        resp = await client.get(
-            SNAPSHOT_URL.format(underlying=underlying),
-            params={"apiKey": settings.polygon_api_key, "limit": 250},
-            timeout=20,
-        )
+        resp = await client.get(url, params=params, timeout=20)
         if resp.status_code in (401, 403):
             raise PermissionError(resp.text[:200])
         resp.raise_for_status()
-        results = resp.json().get("results", [])
+        return resp.json()
+
+    async def _snapshot(self, client: httpx.AsyncClient, underlying: str) -> list[dict]:
+        # NB: the options-snapshot endpoint only supports sort=ticker (sort=volume
+        # returns 400) and caps a page at 250. To surface the *most active*
+        # contracts we page through the chain (following next_url) and keep the
+        # highest day-volume contracts client-side.
+        results: list[dict] = []
+        url = SNAPSHOT_URL.format(underlying=underlying)
+        params = {"apiKey": settings.polygon_api_key, "limit": 250}
+        pages = max(1, settings.polygon_flow_max_pages)
+        for _ in range(pages):
+            body = await self._get(client, url, params)
+            results.extend(body.get("results", []))
+            next_url = body.get("next_url")
+            if not next_url:
+                break
+            # next_url carries the cursor but not the key; resend only the key.
+            url, params = next_url, {"apiKey": settings.polygon_api_key}
         results.sort(key=lambda c: (c.get("day") or {}).get("volume") or 0, reverse=True)
-        return results
+        top = settings.polygon_flow_top_contracts
+        return results[:top] if top and top > 0 else results
 
     def _to_event(self, underlying: str, c: dict) -> FlowEvent | None:
         details = c.get("details", {})

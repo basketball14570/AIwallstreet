@@ -199,6 +199,54 @@ def test_bullish_structures_only_gate(monkeypatch):
     assert d.should_alert(res, single)
 
 
+# ----- Polygon snapshot pagination -----------------------------------------
+def test_polygon_snapshot_paginates_and_keeps_top_volume(monkeypatch):
+    import asyncio
+
+    from app.core.ratelimit import TokenBucket
+    from app.providers.polygon_flow import PolygonFlowProvider
+
+    class _Resp:
+        def __init__(self, body):
+            self._b, self.status_code = body, 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._b
+
+    class _Client:
+        def __init__(self, pages):
+            self.pages, self.calls = pages, []
+
+        async def get(self, url, params=None, timeout=None):
+            self.calls.append((url, params))
+            return _Resp(self.pages.pop(0))
+
+    def vol(v):
+        return {"day": {"volume": v}}
+
+    pages = [
+        {"results": [vol(5), vol(1)], "next_url": "u2"},
+        {"results": [vol(9)], "next_url": "u3"},
+        {"results": [vol(3)]},  # no next_url -> stop
+    ]
+    monkeypatch.setattr(settings, "polygon_flow_max_pages", 5)
+    monkeypatch.setattr(settings, "polygon_flow_top_contracts", 2)
+
+    p = PolygonFlowProvider.__new__(PolygonFlowProvider)
+    p._bucket = TokenBucket(rate=1000, capacity=1000)
+    client = _Client(list(pages))
+
+    out = asyncio.run(p._snapshot(client, "NVDA"))
+    # Followed next_url across all 3 pages, then kept the 2 highest volumes.
+    assert len(client.calls) == 3
+    assert [c["day"]["volume"] for c in out] == [9, 5]
+    # The cursor follow-ups resend only the apiKey, not limit.
+    assert "limit" not in client.calls[1][1]
+
+
 def test_build_ticker_priors_roundtrip(tmp_path):
     from app.jobs.retrain import build_ticker_priors
 
