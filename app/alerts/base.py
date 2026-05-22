@@ -16,9 +16,15 @@ log = get_logger("alerts")
 class AlertDispatcher:
     def __init__(self):
         self.channels = [DiscordAlerter(), TelegramAlerter()]
+        self._allowed = {
+            c.strip() for c in settings.alert_classifications.split(",") if c.strip()
+        }
 
     def should_alert(self, result: ScoreResult) -> bool:
-        return result.confidence >= settings.alert_min_confidence
+        if result.confidence < settings.alert_min_confidence:
+            return False
+        # Empty allow-list => alert on any classification.
+        return not self._allowed or result.classification.value in self._allowed
 
     async def dispatch(self, event: FlowEvent, result: ScoreResult) -> dict[str, str]:
         summary = generate_summary(event, result)

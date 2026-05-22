@@ -28,6 +28,9 @@ class Settings(BaseSettings):
 
     # Behaviour
     alert_min_confidence: float = 70.0
+    # Which classifications may fire an alert. Comma-separated; blank = any.
+    # Defaults to explosion + strong momentum setups only (skip routine/hedging).
+    alert_classifications: str = "Potential Explosion Setup,Strong Momentum Setup"
     env: str = "dev"
     log_level: str = "INFO"
 
