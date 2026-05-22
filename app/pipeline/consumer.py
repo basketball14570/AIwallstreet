@@ -17,7 +17,7 @@ from app.core.queue import ack, consume, reclaim_stale
 from app.core.redis_client import FLOW_CHANNEL, publish
 from app.db.base import SessionLocal
 from app.db.models import Alert, FlowFeatures, FlowScore, RawFlow
-from app.pipeline.realtime import SweepTracker
+from app.pipeline.realtime import SweepTracker, flow_payload
 from app.scoring.sequence import SequenceTracker
 from app.providers.polygon import PolygonContextProvider
 from app.providers.regime import RegimeProvider
@@ -106,12 +106,7 @@ class ScoringConsumer:
     async def _flush(self) -> None:
         written = await self.writer.flush()
         for flow_id, event, result in written:
-            await publish(FLOW_CHANNEL, {
-                "flow_id": flow_id, "ticker": event.ticker,
-                "classification": result.classification.value,
-                "confidence": result.confidence,
-                "explosion_prob": result.explosion_prob, "reasons": result.reasons,
-            })
+            await publish(FLOW_CHANNEL, flow_payload(flow_id, event, result))
             if self.dispatcher.should_alert(result):
                 channels = await self.dispatcher.dispatch(event, result)
                 await self._record_alert(flow_id, event, result, channels)

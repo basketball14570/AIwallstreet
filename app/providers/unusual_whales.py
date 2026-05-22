@@ -82,24 +82,46 @@ class UnusualWhalesProvider(FlowProvider):
 
 
 async def _synthetic_stream(interval: float) -> AsyncIterator[FlowEvent]:
-    tickers = ["GME", "AMC", "SOFI", "PLTR", "RIVN", "MARA", "AAPL"]
+    """Emit synthetic prints. ~60% of the time we add another print to an
+    existing 'hot' contract (ask-side biased) so the per-contract roll-up shows
+    volume accumulating, the way real repeated sweeps do; otherwise we spin up a
+    new contract."""
+    tickers = ["GME", "AMC", "SOFI", "PLTR", "RIVN", "MARA", "AAPL", "TSLA", "NVDA"]
+    hot: list[dict] = []   # recently-active contracts to pile more prints onto
     i = 0
     while True:
-        spot = round(random.uniform(5, 60), 2)
         i += 1
-        yield FlowEvent(
-            source="unusual_whales",
-            external_id=f"synthetic-{i}",
-            ticker=random.choice(tickers),
-            contract_type=ContractType.CALL,
-            strike=round(spot * random.uniform(1.0, 1.2), 1),
-            expiry=datetime.now(timezone.utc) + timedelta(days=random.choice([7, 14, 30])),
-            side=random.choice([Side.ASK, Side.ASK, Side.MID, Side.BID]),
-            is_sweep=random.random() > 0.4,
-            is_spread=random.random() > 0.85,
-            premium=round(random.uniform(50_000, 2_000_000), 0),
-            size=random.randint(100, 5000),
-            spot=spot,
-            observed_at=datetime.now(timezone.utc),
-        )
+        if hot and random.random() < 0.6:
+            c = random.choice(hot)
+            size = random.randint(200, 6000)
+            yield FlowEvent(
+                source="unusual_whales", external_id=f"synthetic-{i}",
+                ticker=c["ticker"], contract_type=ContractType.CALL,
+                strike=c["strike"], expiry=c["expiry"],
+                side=random.choices([Side.ASK, Side.MID, Side.BID], weights=[7, 2, 1])[0],
+                is_sweep=random.random() > 0.3, is_spread=random.random() > 0.9,
+                premium=round(random.uniform(40_000, 900_000), 0),
+                size=size, spot=c["spot"], observed_at=datetime.now(timezone.utc),
+            )
+        else:
+            spot = round(random.uniform(5, 400), 2)
+            c = {
+                "ticker": random.choice(tickers),
+                "strike": round(spot * random.uniform(1.0, 1.2), 1),
+                "expiry": datetime.now(timezone.utc) + timedelta(days=random.choice([7, 14, 30])),
+                "spot": spot,
+            }
+            hot.append(c)
+            if len(hot) > 12:
+                hot.pop(0)
+            yield FlowEvent(
+                source="unusual_whales", external_id=f"synthetic-{i}",
+                ticker=c["ticker"], contract_type=ContractType.CALL,
+                strike=c["strike"], expiry=c["expiry"],
+                side=random.choices([Side.ASK, Side.MID, Side.BID], weights=[5, 2, 3])[0],
+                is_sweep=random.random() > 0.4, is_spread=random.random() > 0.85,
+                premium=round(random.uniform(50_000, 2_000_000), 0),
+                size=random.randint(100, 5000), spot=spot,
+                observed_at=datetime.now(timezone.utc),
+            )
         await asyncio.sleep(interval)

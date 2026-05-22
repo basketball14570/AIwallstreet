@@ -35,18 +35,33 @@
   th { font-size:11px; text-transform:uppercase; color:var(--muted); position:sticky; top:0;
        background:var(--panel); }
   td.tk { font-weight:700; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  th.num { text-align:right; }
   .pill { padding:2px 8px; border-radius:20px; font-size:11px; font-weight:700; }
   .Normal,.Hedging { background:#1f2735; color:var(--muted); }
   .Fake { background:#3a1d28; color:var(--red); }
   .Watchlist { background:#1f2b3d; color:var(--blue); }
   .Momentum { background:#2a2410; color:var(--amber); }
   .Explosion { background:#103025; color:var(--green); }
+  .side { font-weight:700; font-size:12px; }
+  .side.ask { color:var(--green); } .side.bid { color:var(--red); } .side.mid { color:var(--muted); }
   .bar { height:6px; border-radius:4px; background:var(--panel2); overflow:hidden; width:90px; }
   .bar > i { display:block; height:100%; background:var(--green); }
+  .split { display:flex; height:8px; width:120px; border-radius:4px; overflow:hidden; background:var(--panel2); }
+  .split > .b { background:var(--green); } .split > .s { background:var(--red); }
   tr.flash { animation:flash 1.2s ease-out; }
   @keyframes flash { from{background:#1c2740;} to{background:transparent;} }
-  .reasons { color:var(--muted); font-size:12px; white-space:normal; max-width:380px; }
-  .feed { max-height:calc(100vh - 220px); overflow:auto; }
+  .reasons { color:var(--muted); font-size:12px; white-space:normal; max-width:340px; }
+  .feed { max-height:calc(100vh - 240px); overflow:auto; }
+  .tabs { display:flex; gap:4px; padding:10px 12px 0; border-bottom:1px solid var(--line); }
+  .tab { padding:8px 14px; font-size:12px; text-transform:uppercase; letter-spacing:.5px;
+         color:var(--muted); cursor:pointer; border:1px solid transparent; border-bottom:none;
+         border-radius:8px 8px 0 0; }
+  .tab.active { color:var(--txt); background:var(--panel2); border-color:var(--line); }
+  .sweep { color:var(--amber); font-size:11px; }
+  .view { display:none; } .view.active { display:block; }
+  .searchbar { padding:10px 14px; border-bottom:1px solid var(--line); }
+  .muted { color:var(--muted); }
 </style>
 </head>
 <body>
@@ -64,6 +79,10 @@
         <div>
           <label>Min confidence: <span id="confVal">0</span></label>
           <input type="range" id="minConf" min="0" max="100" value="0" />
+        </div>
+        <div>
+          <label>Min premium: <span id="premVal">$0</span></label>
+          <input type="range" id="minPrem" min="0" max="2000000" step="50000" value="0" />
         </div>
         <div>
           <label>Classification</label>
@@ -89,15 +108,54 @@
   </div>
 
   <div class="panel">
-    <h2>Live scored flow</h2>
-    <div class="feed">
-      <table>
-        <thead><tr>
-          <th>Time</th><th>Ticker</th><th>Class</th><th>Conf</th>
-          <th>Explosion</th><th>Why</th>
-        </tr></thead>
-        <tbody id="rows"></tbody>
-      </table>
+    <div class="tabs">
+      <div class="tab active" data-tab="live">Live flow</div>
+      <div class="tab" data-tab="buys">Top buys</div>
+      <div class="tab" data-tab="contracts">By contract</div>
+    </div>
+
+    <!-- LIVE -->
+    <div class="view active" id="view-live">
+      <div class="feed">
+        <table>
+          <thead><tr>
+            <th>Time</th><th>Contract</th><th>Class</th><th>Conf</th>
+            <th>Explosion</th><th class="num">Premium</th><th>Why</th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TOP BUYS -->
+    <div class="view" id="view-buys">
+      <div class="searchbar muted">Largest aggressive buys (hit the ask), last seen — refreshes every 4s.</div>
+      <div class="feed">
+        <table>
+          <thead><tr>
+            <th>Time</th><th>Contract</th><th>Side</th><th class="num">Size</th>
+            <th class="num">Premium</th><th>Class</th><th class="num">Conf</th>
+          </tr></thead>
+          <tbody id="buyRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- CONTRACTS -->
+    <div class="view" id="view-contracts">
+      <div class="searchbar">
+        <input id="ctSearch" placeholder="Filter by ticker (e.g. TSLA) — blank = all" />
+      </div>
+      <div class="feed">
+        <table>
+          <thead><tr>
+            <th>Contract</th><th class="num">Spot</th><th class="num">Volume</th>
+            <th>Bought / Sold</th><th class="num">Bull%</th>
+            <th class="num">Premium</th><th class="num">Sweeps</th><th class="num">Prints</th>
+          </tr></thead>
+          <tbody id="ctRows"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -105,24 +163,45 @@
 <script>
 const tbody = document.getElementById('rows');
 const stats = { events:0, alerts:0, expl:0, tickers:{} };
-let minConf = 0, classFilter = '';
+let minConf = 0, minPrem = 0, classFilter = '';
 
 document.getElementById('minConf').addEventListener('input', e => {
   minConf = +e.target.value; document.getElementById('confVal').textContent = minConf;
+  applyFilter();
+});
+document.getElementById('minPrem').addEventListener('input', e => {
+  minPrem = +e.target.value; document.getElementById('premVal').textContent = fmtUsd(minPrem);
   applyFilter();
 });
 document.getElementById('classFilter').addEventListener('change', e => {
   classFilter = e.target.value; applyFilter();
 });
 
+function fmtUsd(n){
+  if (n==null) return '—'; const a=Math.abs(n);
+  if (a>=1e9) return '$'+(n/1e9).toFixed(2)+'B';
+  if (a>=1e6) return '$'+(n/1e6).toFixed(2)+'M';
+  if (a>=1e3) return '$'+(n/1e3).toFixed(0)+'K';
+  return '$'+(+n).toFixed(0);
+}
+function fmtNum(n){ return n==null ? '—' : (+n).toLocaleString(); }
+function contractLabel(d){
+  const t = ((d.contract_type||'call')[0]||'c').toUpperCase();
+  const exp = d.expiry ? new Date(d.expiry) : null;
+  const md = exp ? `${exp.getMonth()+1}/${exp.getDate()}` : '';
+  const k = d.strike==null ? '' : (+d.strike % 1 === 0 ? +d.strike : (+d.strike).toFixed(1));
+  return `${d.ticker} ${k}${t} ${md}`;
+}
+function timeStr(s){ return s ? new Date(s).toLocaleTimeString() : new Date().toLocaleTimeString(); }
+function shortClass(c){ return (c||'').split(' ')[0].replace('/',''); }
+
 function applyFilter() {
   for (const tr of tbody.children) {
-    const c = +tr.dataset.conf, k = tr.dataset.class;
-    tr.style.display = (c >= minConf && (!classFilter || k === classFilter)) ? '' : 'none';
+    const c = +tr.dataset.conf, p = +tr.dataset.prem, k = tr.dataset.class;
+    const ok = c >= minConf && p >= minPrem && (!classFilter || k === classFilter);
+    tr.style.display = ok ? '' : 'none';
   }
 }
-
-function shortClass(c){ return (c||'').split(' ')[0].replace('/',''); }
 
 function addRow(d) {
   stats.events++;
@@ -138,14 +217,17 @@ function addRow(d) {
   const tr = document.createElement('tr');
   tr.className = 'flash';
   tr.dataset.conf = d.confidence; tr.dataset.class = d.classification;
+  tr.dataset.prem = d.premium || 0;
   const cls = shortClass(d.classification);
   const expl = Math.round((d.explosion_prob||0)*100);
+  const sweep = d.is_sweep ? ' <span class="sweep">⚡</span>' : '';
   tr.innerHTML = `
-    <td>${new Date().toLocaleTimeString()}</td>
-    <td class="tk">${d.ticker}</td>
+    <td>${timeStr(d.observed_at)}</td>
+    <td class="tk">${contractLabel(d)}${sweep}</td>
     <td><span class="pill ${cls}">${d.classification}</span></td>
-    <td>${d.confidence.toFixed(0)}</td>
+    <td>${(+d.confidence).toFixed(0)}</td>
     <td><div class="bar"><i style="width:${expl}%"></i></div></td>
+    <td class="num">${fmtUsd(d.premium)}</td>
     <td class="reasons">${(d.reasons||[]).slice(0,3).join(' · ')}</td>`;
   tbody.prepend(tr);
   while (tbody.children.length > 200) tbody.removeChild(tbody.lastChild);
@@ -155,10 +237,67 @@ function addRow(d) {
 async function loadRecent() {
   try {
     const r = await fetch('/flow/recent?limit=50');
-    const data = await r.json();
-    data.reverse().forEach(addRow);
+    (await r.json()).reverse().forEach(addRow);
   } catch (e) { /* API may be empty on first boot */ }
 }
+
+// ---- Top buys ----
+async function loadBuys() {
+  try {
+    const r = await fetch('/flow/recent?sort=premium&side=ask&limit=40');
+    const data = await r.json();
+    const tb = document.getElementById('buyRows');
+    tb.innerHTML = data.map(d => `
+      <tr>
+        <td>${timeStr(d.observed_at)}</td>
+        <td class="tk">${contractLabel(d)}${d.is_sweep?' <span class="sweep">⚡</span>':''}</td>
+        <td><span class="side ${d.side||'mid'}">${(d.side||'—').toUpperCase()}</span></td>
+        <td class="num">${fmtNum(d.size)}</td>
+        <td class="num">${fmtUsd(d.premium)}</td>
+        <td><span class="pill ${shortClass(d.classification)}">${d.classification}</span></td>
+        <td class="num">${(+d.confidence).toFixed(0)}</td>
+      </tr>`).join('');
+  } catch (e) {}
+}
+
+// ---- By contract ----
+async function loadContracts() {
+  try {
+    const t = document.getElementById('ctSearch').value.trim();
+    const q = t ? `&ticker=${encodeURIComponent(t)}` : '';
+    const r = await fetch(`/flow/contracts?limit=40${q}`);
+    const data = await r.json();
+    const tb = document.getElementById('ctRows');
+    tb.innerHTML = data.map(d => {
+      const bull = d.bull_pct==null ? null : Math.round(d.bull_pct*100);
+      const bw = bull==null ? 50 : bull;
+      return `
+      <tr>
+        <td class="tk">${contractLabel(d)}</td>
+        <td class="num">${d.spot!=null?'$'+(+d.spot).toFixed(2):'—'}</td>
+        <td class="num">${fmtNum(d.volume)}</td>
+        <td><div class="split"><span class="b" style="width:${bw}%"></span><span class="s" style="width:${100-bw}%"></span></div></td>
+        <td class="num" style="color:${bull>=55?'var(--green)':bull<=45?'var(--red)':'var(--muted)'}">${bull==null?'—':bull+'%'}</td>
+        <td class="num">${fmtUsd(d.premium)}</td>
+        <td class="num">${d.sweeps}</td>
+        <td class="num">${d.prints}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {}
+}
+document.getElementById('ctSearch').addEventListener('input', () => { if (activeTab==='contracts') loadContracts(); });
+
+// ---- Tabs + polling ----
+let activeTab = 'live', poll = null;
+function setTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===name));
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id===`view-${name}`));
+  if (poll) { clearInterval(poll); poll = null; }
+  if (name === 'buys')      { loadBuys();      poll = setInterval(loadBuys, 4000); }
+  if (name === 'contracts') { loadContracts(); poll = setInterval(loadContracts, 5000); }
+}
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
