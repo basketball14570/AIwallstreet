@@ -19,7 +19,7 @@ from app.db.models import Alert, FlowFeatures, FlowScore, RawFlow
 from app.providers.polygon import PolygonContextProvider
 from app.providers.regime import RegimeProvider
 from app.providers.unusual_whales import UnusualWhalesProvider
-from app.schemas.flow import FlowEvent, ScoreResult
+from app.schemas.flow import FlowEvent, FlowFeatureVector, ScoreResult
 from app.scoring.classifier import classify
 from app.scoring.sequence import SequenceTracker
 
@@ -28,10 +28,12 @@ log = get_logger("pipeline")
 SWEEP_WINDOW_SEC = 600  # 10 min lookback for repeated-sweep detection
 
 
-def flow_payload(flow_id: int, event: FlowEvent, result: ScoreResult) -> dict:
+def flow_payload(flow_id: int, event: FlowEvent, result: ScoreResult,
+                 features: "FlowFeatureVector | None" = None) -> dict:
     """Live-channel payload — carries contract details so the dashboard can
-    show premium/size and roll prints up per contract."""
-    return {
+    show premium/size and roll prints up per contract, plus the screener
+    signals (IV-rank, vol/OI, structure, follow-through)."""
+    payload = {
         "flow_id": flow_id,
         "ticker": event.ticker,
         "contract_type": event.contract_type.value,
@@ -50,6 +52,14 @@ def flow_payload(flow_id: int, event: FlowEvent, result: ScoreResult) -> dict:
         "explosion_prob": result.explosion_prob,
         "reasons": result.reasons,
     }
+    if features is not None:
+        payload.update({
+            "iv_rank": features.iv_rank,
+            "is_opening": features.is_opening,
+            "bullish_structure": features.bullish_structure >= 1.0,
+            "follow_through": features.follow_through,
+        })
+    return payload
 
 
 def _contract_key(event: FlowEvent) -> str:
@@ -227,7 +237,7 @@ class Pipeline:
                                     follow_through=follow, iv_rank=iv_rank)
         flow_id = await self._persist(event, features, result)
 
-        await publish(FLOW_CHANNEL, flow_payload(flow_id, event, result))
+        await publish(FLOW_CHANNEL, flow_payload(flow_id, event, result, features))
 
         if self.dispatcher.should_alert(result, event, features):
             channels = await self.dispatcher.dispatch(event, result)

@@ -85,8 +85,17 @@ tests/                   # scoring engine sanity tests
 | `watchlist` | user-curated tickers |
 | `outcome` | realised forward returns for labelling + backtest |
 
-See `app/db/models.py`. MVP uses `create_all`; use Alembic for production
-migrations.
+See `app/db/models.py`. Schema is managed by **Alembic** (`alembic/`): the
+`docker compose` stack runs a one-shot `migrate` service (`alembic upgrade head`)
+before the api/worker/scheduler start, so adding feature columns no longer needs
+`docker compose down -v`. Locally:
+
+```bash
+alembic upgrade head                       # apply migrations
+alembic revision --autogenerate -m "msg"   # after editing models
+```
+(`init_db`'s `create_all` is kept as a dev fallback for `uvicorn` runs without
+Alembic and is idempotent alongside it.)
 
 ---
 
@@ -280,9 +289,13 @@ scoring engine, classification + 4 probabilities, async pipeline, Postgres
 schema, Redis pub/sub, WebSocket stream, Discord/Telegram alerts, watchlist API,
 triple-barrier labeling, calibrated training script, backtest engine, tests.
 
-**Deliberately stubbed (clear extension points):** real UW/Polygon field
-mapping, live sentiment clients (tweepy/PRAW/NewsAPI), dark-pool feed, a
-front-end dashboard, Alembic migrations, auth.
+The dashboard surfaces the screener signals directly: the live feed and the
+by-contract view show **IV-rank, vol/OI (with an OPEN tag), bullish-structure
+and follow-through** badges, and alerts include a one-line `signals:` summary.
+
+**Deliberately stubbed (clear extension points):** live sentiment clients
+(tweepy/PRAW/NewsAPI), dark-pool feed, intraday quote/trade entitlement for
+aggressor-side inference, auth.
 
 ---
 

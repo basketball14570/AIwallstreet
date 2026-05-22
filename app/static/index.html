@@ -51,7 +51,15 @@
   .split > .b { background:var(--green); } .split > .s { background:var(--red); }
   tr.flash { animation:flash 1.2s ease-out; }
   @keyframes flash { from{background:#1c2740;} to{background:transparent;} }
-  .reasons { color:var(--muted); font-size:12px; white-space:normal; max-width:340px; }
+  .reasons { color:var(--muted); font-size:12px; white-space:normal; max-width:300px; }
+  .badge { display:inline-block; padding:1px 6px; border-radius:5px; font-size:10px;
+           font-weight:700; margin:0 3px 2px 0; white-space:nowrap; }
+  .badge.open  { background:#103025; color:var(--green); }
+  .badge.iv    { background:#1f2b3d; color:var(--blue); }
+  .badge.ivhot { background:#3a1d28; color:var(--red); }
+  .badge.struct{ background:#241f3d; color:var(--purple); }
+  .badge.ft    { background:#2a2410; color:var(--amber); }
+  td.sig { white-space:normal; max-width:200px; }
   .feed { max-height:calc(100vh - 240px); overflow:auto; }
   .tabs { display:flex; gap:4px; padding:10px 12px 0; border-bottom:1px solid var(--line); }
   .tab { padding:8px 14px; font-size:12px; text-transform:uppercase; letter-spacing:.5px;
@@ -120,7 +128,7 @@
         <table>
           <thead><tr>
             <th>Time</th><th>Contract</th><th>Class</th><th>Conf</th>
-            <th>Explosion</th><th class="num">Premium</th><th>Why</th>
+            <th>Explosion</th><th class="num">Premium</th><th>Signals</th><th>Why</th>
           </tr></thead>
           <tbody id="rows"></tbody>
         </table>
@@ -151,6 +159,7 @@
           <thead><tr>
             <th>Contract</th><th class="num">Spot</th><th class="num">Volume</th>
             <th>Bought / Sold</th><th class="num">Bull%</th>
+            <th class="num">IVR</th><th class="num">Vol/OI</th><th>Signals</th>
             <th class="num">Premium</th><th class="num">Sweeps</th><th class="num">Prints</th>
           </tr></thead>
           <tbody id="ctRows"></tbody>
@@ -194,6 +203,18 @@ function contractLabel(d){
 }
 function timeStr(s){ return s ? new Date(s).toLocaleTimeString() : new Date().toLocaleTimeString(); }
 function shortClass(c){ return (c||'').split(' ')[0].replace('/',''); }
+// Compact badges for the screener signals (IV-rank, vol/OI opening, structure,
+// follow-through). iv_rank===0.5 is the "unknown" sentinel -> skipped.
+function signalBadges(d){
+  const out = [];
+  if (d.is_opening || (d.vol_oi!=null && d.vol_oi>=1))
+    out.push(`<span class="badge open">OPEN${d.vol_oi!=null?' '+(+d.vol_oi).toFixed(1)+'x':''}</span>`);
+  if (d.iv_rank!=null && d.iv_rank!==0.5)
+    out.push(`<span class="badge ${d.iv_rank>=0.9?'ivhot':'iv'}">IVR ${Math.round(d.iv_rank*100)}%</span>`);
+  if (d.bullish_structure) out.push('<span class="badge struct">BULL SPREAD</span>');
+  if (d.follow_through!=null && d.follow_through>0.5) out.push('<span class="badge ft">FOLLOW</span>');
+  return out.join('');
+}
 
 function applyFilter() {
   for (const tr of tbody.children) {
@@ -228,6 +249,7 @@ function addRow(d) {
     <td>${(+d.confidence).toFixed(0)}</td>
     <td><div class="bar"><i style="width:${expl}%"></i></div></td>
     <td class="num">${fmtUsd(d.premium)}</td>
+    <td class="sig">${signalBadges(d)}</td>
     <td class="reasons">${(d.reasons||[]).slice(0,3).join(' · ')}</td>`;
   tbody.prepend(tr);
   while (tbody.children.length > 200) tbody.removeChild(tbody.lastChild);
@@ -278,6 +300,9 @@ async function loadContracts() {
         <td class="num">${fmtNum(d.volume)}</td>
         <td><div class="split"><span class="b" style="width:${bw}%"></span><span class="s" style="width:${100-bw}%"></span></div></td>
         <td class="num" style="color:${bull>=55?'var(--green)':bull<=45?'var(--red)':'var(--muted)'}">${bull==null?'—':bull+'%'}</td>
+        <td class="num">${d.iv_rank!=null&&d.iv_rank!==0.5?Math.round(d.iv_rank*100)+'%':'—'}</td>
+        <td class="num">${d.vol_oi!=null?(+d.vol_oi).toFixed(1)+'x':'—'}</td>
+        <td class="sig">${signalBadges(d)}</td>
         <td class="num">${fmtUsd(d.premium)}</td>
         <td class="num">${d.sweeps}</td>
         <td class="num">${d.prints}</td>

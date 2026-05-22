@@ -16,6 +16,17 @@ services:
     image: redis:7
     ports: ["6379:6379"]
 
+  # One-shot schema migration. Runs to completion before api/worker/scheduler
+  # start, so adding feature columns no longer needs `docker compose down -v`.
+  migrate:
+    build: .
+    command: alembic upgrade head
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://flow:flow@db:5432/flow
+    depends_on:
+      db: {condition: service_healthy}
+
   api:
     build: .
     env_file: .env
@@ -27,6 +38,7 @@ services:
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}
+      migrate: {condition: service_completed_successfully}
 
   worker:
     build: .
@@ -39,6 +51,7 @@ services:
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}
+      migrate: {condition: service_completed_successfully}
 
   scheduler:
     build: .
@@ -51,6 +64,7 @@ services:
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}
+      migrate: {condition: service_completed_successfully}
 
 volumes:
   pgdata:

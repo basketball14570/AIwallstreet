@@ -8,7 +8,7 @@ from sqlalchemy import case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_session
-from app.db.models import FlowScore, RawFlow
+from app.db.models import FlowFeatures, FlowScore, RawFlow
 from app.schemas.flow import FlowEvent, MarketContext, ScoreResult
 from app.scoring.classifier import classify
 
@@ -37,8 +37,9 @@ async def recent_flow(
     aggressive *buys* (buyer lifting the offer) — the 'big buys' feed."""
     order = desc(RawFlow.premium) if sort == "premium" else desc(RawFlow.observed_at)
     stmt = (
-        select(RawFlow, FlowScore)
+        select(RawFlow, FlowScore, FlowFeatures)
         .join(FlowScore, FlowScore.flow_id == RawFlow.id)
+        .join(FlowFeatures, FlowFeatures.flow_id == RawFlow.id)
         .where(FlowScore.confidence >= min_confidence)
         .where(RawFlow.premium >= min_premium)
         .order_by(order)
@@ -66,8 +67,14 @@ async def recent_flow(
             "explosion_prob": s.explosion_prob,
             "squeeze_prob": s.squeeze_prob,
             "reasons": s.reasons.get("reasons", []),
+            # Screener signals
+            "iv_rank": ff.iv_rank,
+            "vol_oi": ff.vol_oi,
+            "is_opening": ff.is_opening,
+            "bullish_structure": ff.bullish_structure >= 1.0,
+            "follow_through": ff.follow_through,
         }
-        for f, s in rows
+        for f, s, ff in rows
     ]
 
 
@@ -100,7 +107,14 @@ async def contract_rollup(
             func.count().label("prints"),
             func.max(RawFlow.spot).label("spot"),
             func.max(RawFlow.observed_at).label("last_seen"),
+            # Screener signals per contract (vol/OI & IV-rank are ~constant
+            # across a contract's prints, so max is representative).
+            func.max(FlowFeatures.vol_oi).label("vol_oi"),
+            func.max(FlowFeatures.iv_rank).label("iv_rank"),
+            func.bool_or(FlowFeatures.is_opening).label("is_opening"),
+            func.max(FlowFeatures.bullish_structure).label("bullish_structure"),
         )
+        .join(FlowFeatures, FlowFeatures.flow_id == RawFlow.id)
         .where(RawFlow.observed_at >= since)
         .group_by(RawFlow.ticker, RawFlow.contract_type, RawFlow.strike, RawFlow.expiry)
         .having(func.sum(RawFlow.premium) >= min_premium)
@@ -129,5 +143,9 @@ async def contract_rollup(
             "prints": int(r.prints or 0),
             "spot": r.spot,
             "last_seen": r.last_seen,
+            "vol_oi": float(r.vol_oi) if r.vol_oi is not None else None,
+            "iv_rank": float(r.iv_rank) if r.iv_rank is not None else None,
+            "is_opening": bool(r.is_opening),
+            "bullish_structure": (r.bullish_structure or 0) >= 1.0,
         })
     return out

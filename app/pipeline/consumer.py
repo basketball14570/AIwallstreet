@@ -115,7 +115,7 @@ class ScoringConsumer:
     async def _flush(self) -> None:
         written = await self.writer.flush()
         for flow_id, event, features, result in written:
-            await publish(FLOW_CHANNEL, flow_payload(flow_id, event, result))
+            await publish(FLOW_CHANNEL, flow_payload(flow_id, event, result, features))
             if self.dispatcher.should_alert(result, event, features):
                 channels = await self.dispatcher.dispatch(event, result)
                 await self._record_alert(flow_id, event, result, channels)
