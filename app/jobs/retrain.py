@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app.core.logging import get_logger
 from app.db.base import SessionLocal, init_db
-from app.db.models import FlowFeatures, FlowScore, Outcome
+from app.db.models import FlowFeatures, FlowScore, Outcome, RawFlow
 from app.ml.calibrate import fit_from_arrays
 from app.ml.feature_engineering import FEATURE_COLUMNS
 from app.ml.train import train
@@ -33,17 +33,27 @@ MIN_POSITIVES = 20
 
 def build_library(feat_df: pd.DataFrame, labels: np.ndarray) -> HistoricalLibrary:
     X = feat_df.reindex(columns=FEATURE_COLUMNS).fillna(0.0).to_numpy(dtype=float)
-    return HistoricalLibrary.fit(X, labels)
+    analog_labels = None
+    if "ticker" in feat_df.columns and "observed_at" in feat_df.columns:
+        analog_labels = [
+            f"{t} {pd.Timestamp(d):%Y-%m-%d}"
+            for t, d in zip(feat_df["ticker"], feat_df["observed_at"])
+        ]
+    return HistoricalLibrary.fit(X, labels, analog_labels)
 
 
 async def _load_training_frame(session) -> pd.DataFrame:
     cols = [getattr(FlowFeatures, c) for c in FEATURE_COLUMNS]
-    stmt = (select(FlowFeatures.flow_id, *cols, Outcome.label)
+    stmt = (select(FlowFeatures.flow_id, *cols, Outcome.label,
+                   RawFlow.ticker, RawFlow.observed_at)
             .join(Outcome, Outcome.flow_id == FlowFeatures.flow_id)
+            .join(RawFlow, RawFlow.id == FlowFeatures.flow_id)
             .where(Outcome.label.isnot(None))
             .order_by(FlowFeatures.flow_id))
     rows = (await session.execute(stmt)).all()
-    return pd.DataFrame(rows, columns=["flow_id", *FEATURE_COLUMNS, "label"])
+    return pd.DataFrame(
+        rows, columns=["flow_id", *FEATURE_COLUMNS, "label", "ticker", "observed_at"]
+    )
 
 
 async def _load_calibration_pairs(session) -> tuple[list[float], list[int]]:

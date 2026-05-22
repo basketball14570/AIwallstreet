@@ -19,6 +19,7 @@ from app.db.base import SessionLocal
 from app.db.models import Alert, FlowFeatures, FlowScore, RawFlow
 from app.pipeline.realtime import SweepTracker
 from app.providers.polygon import PolygonContextProvider
+from app.providers.regime import RegimeProvider
 from app.schemas.flow import FlowEvent, FlowFeatureVector, ScoreResult
 from app.scoring.classifier import classify
 
@@ -92,6 +93,7 @@ class ScoringConsumer:
     def __init__(self, name: str):
         self.name = name
         self.context = PolygonContextProvider()
+        self.regime_provider = RegimeProvider()
         self.dispatcher = AlertDispatcher()
         self.sweeps = SweepTracker()
         self.writer = BatchWriter()
@@ -127,8 +129,9 @@ class ScoringConsumer:
     async def handle(self, msg_id: str, data: dict) -> None:
         event = FlowEvent(**data)
         ctx = await self.context.get_context(event.ticker)
+        regime = await self.regime_provider.get_regime()
         repeated = self.sweeps.record(event)
-        features, result = classify(event, ctx, repeated_sweeps=repeated)
+        features, result = classify(event, ctx, repeated_sweeps=repeated, regime=regime)
         self.writer.add(event, features, result)
         self._pending_ids.append(msg_id)
 

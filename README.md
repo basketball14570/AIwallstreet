@@ -190,6 +190,32 @@ reports: **hit rate, average move after alert, average max run-up, worst
 drawdown, precision, recall, and setup quality per week**. Because it reuses
 `classify()`, backtest and live behaviour cannot drift.
 
+**True-north metric — `high_conf_precision`**: precision among only the ≥90
+confidence alerts. A trader needs a few elite setups, not many mediocre ones,
+so this matters far more than overall win rate. `precision_by_confidence` gives
+the per-band calibration view (a healthy system shows precision rising
+monotonically with confidence).
+
+## 8b. Market-regime layer
+
+`app/scoring/regime.py` + `app/providers/regime.py`. The same flow means
+different things in different tapes, so a regime is detected from macro inputs
+(VIX level/trend, breadth, put/call skew, small-cap RS, market-wide dealer
+gamma) and used to **dynamically damp or boost** bullish probabilities and
+tighten the alert threshold:
+
+| Regime | Effect |
+|---|---|
+| `risk_off` (VIX spiking, weak breadth) | strong damp — fade speculation |
+| `low_vol_chop` (complacent tape) | damp — squeezes historically fizzle |
+| `high_vol_squeeze` (short gamma, small-caps lead) | modest boost |
+| `neutral` | identity (no effect) |
+
+This is the highest-leverage false-positive control after corroboration: the
+*same* explosive-looking sweep is an alert in a neutral tape but downgraded
+below threshold in risk-off / low-vol chop. Regime is sampled periodically and
+cached in Redis, shared across all scoring consumers.
+
 ---
 
 ## 9. Quickstart

@@ -17,6 +17,7 @@ from app.core.redis_client import FLOW_CHANNEL, publish
 from app.db.base import SessionLocal
 from app.db.models import Alert, FlowFeatures, FlowScore, RawFlow
 from app.providers.polygon import PolygonContextProvider
+from app.providers.regime import RegimeProvider
 from app.providers.unusual_whales import UnusualWhalesProvider
 from app.schemas.flow import FlowEvent, ScoreResult
 from app.scoring.classifier import classify
@@ -51,6 +52,7 @@ class Pipeline:
         self.context = PolygonContextProvider()
         self.dispatcher = AlertDispatcher()
         self.sweeps = SweepTracker()
+        self.regime_provider = RegimeProvider()
 
     async def _persist(self, event: FlowEvent, features, result: ScoreResult) -> int:
         async with SessionLocal() as session:
@@ -113,8 +115,9 @@ class Pipeline:
 
     async def process(self, event: FlowEvent) -> ScoreResult:
         ctx = await self.context.get_context(event.ticker)
+        regime = await self.regime_provider.get_regime()
         repeated = self.sweeps.record(event)
-        features, result = classify(event, ctx, repeated_sweeps=repeated)
+        features, result = classify(event, ctx, repeated_sweeps=repeated, regime=regime)
         flow_id = await self._persist(event, features, result)
 
         await publish(FLOW_CHANNEL, {

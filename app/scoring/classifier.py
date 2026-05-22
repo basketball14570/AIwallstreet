@@ -17,6 +17,7 @@ from app.schemas.flow import (
 )
 from app.scoring.engine import ScoringEngine
 from app.scoring.features import build_features
+from app.scoring.regime import NEUTRAL, Regime
 
 _engine = ScoringEngine()
 
@@ -88,9 +89,24 @@ def _label(probs: dict[str, float], confidence: float) -> Classification:
     return Classification.NORMAL
 
 
-def classify_features(features: FlowFeatureVector) -> ScoreResult:
+def _apply_regime(probs: dict[str, float], regime: Regime) -> None:
+    """Scale bullish probabilities in place by the regime multiplier."""
+    if regime.bullish_multiplier == 1.0:
+        return
+    for k in ("explosion_prob", "squeeze_prob", "momentum_prob"):
+        probs[k] = round(_clamp(probs[k] * regime.bullish_multiplier), 4)
+
+
+def classify_features(
+    features: FlowFeatureVector, regime: Regime = NEUTRAL
+) -> ScoreResult:
     components, probs = _engine.score(features)
-    confidence = _confidence(probs, components)
+    _apply_regime(probs, regime)
+    confidence = _clamp(_confidence(probs, components) * regime.confidence_scale, 0, 100)
+    confidence = round(confidence, 1)
+    reasons = list(components.reasons)
+    if regime.name != "neutral" and regime.reason:
+        reasons.append(f"Regime: {regime.reason}")
     classification = _label(probs, confidence)
     return ScoreResult(
         classification=classification,
@@ -100,7 +116,7 @@ def classify_features(features: FlowFeatureVector) -> ScoreResult:
         momentum_prob=probs["momentum_prob"],
         fake_flow_prob=probs["fake_flow_prob"],
         component_scores=components.as_dict(),
-        reasons=components.reasons,
+        reasons=reasons,
     )
 
 
@@ -108,11 +124,18 @@ def classify(
     event: FlowEvent,
     ctx: MarketContext | None = None,
     repeated_sweeps: int = 0,
+    regime: Regime = NEUTRAL,
 ) -> tuple[FlowFeatureVector, ScoreResult]:
     features = build_features(event, ctx, repeated_sweeps=repeated_sweeps)
+    analogs: list[tuple[str, float]] = []
     lib = _get_library()
     if lib is not None:
         from app.scoring.similarity import vector_from_features
 
-        features.historical_similarity = lib.query(vector_from_features(features))
-    return features, classify_features(features)
+        sim, analogs = lib.query_with_analogs(vector_from_features(features))
+        features.historical_similarity = sim
+    result = classify_features(features, regime)
+    if analogs:
+        names = ", ".join(f"{t} ({s:.0%})" for t, s in analogs)
+        result.reasons.append(f"Resembles past explosive setups: {names}")
+    return features, result

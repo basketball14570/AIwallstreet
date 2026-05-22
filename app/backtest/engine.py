@@ -76,14 +76,44 @@ def _metrics(df: pd.DataFrame) -> dict:
         if n_alerts else 0.0,
         "precision": round(precision, 4),
         "recall": round(recall, 4),
+        # TRUE NORTH: precision among only the high-conviction (>=90) alerts.
+        # A trader needs a few elite setups, not many mediocre ones.
+        "high_conf_precision": _precision_at(df, 90),
+        "precision_by_confidence": _precision_by_bucket(df),
         "quality_over_time": _quality_over_time(alerts),
     }
+
+
+def _precision_at(df: pd.DataFrame, threshold: float) -> dict:
+    sel = df[df["confidence"] >= threshold]
+    n = len(sel)
+    return {
+        "threshold": threshold,
+        "n": n,
+        "precision": round(float(sel["label"].mean()), 4) if n else None,
+        "avg_move": round(float(sel["ret_5d"].mean()), 4) if n else None,
+    }
+
+
+def _precision_by_bucket(df: pd.DataFrame) -> dict:
+    """Calibration view: realised hit-rate per confidence band. A well-behaved
+    system shows monotonically rising precision with confidence."""
+    bands = [(0, 50), (50, 70), (70, 90), (90, 101)]
+    out = {}
+    for lo, hi in bands:
+        sel = df[(df["confidence"] >= lo) & (df["confidence"] < hi)]
+        out[f"{lo}-{hi if hi <= 100 else 100}"] = {
+            "n": len(sel),
+            "precision": round(float(sel["label"].mean()), 4) if len(sel) else None,
+        }
+    return out
 
 
 def _quality_over_time(alerts: pd.DataFrame) -> dict:
     if alerts.empty:
         return {}
     a = alerts.copy()
-    a["week"] = pd.to_datetime(a["observed_at"]).dt.to_period("W").astype(str)
+    ts = pd.to_datetime(a["observed_at"], utc=True).dt.tz_localize(None)
+    a["week"] = ts.dt.to_period("W").astype(str)
     grp = a.groupby("week")["label"].mean().round(4)
     return grp.to_dict()
