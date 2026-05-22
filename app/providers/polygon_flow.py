@@ -92,6 +92,7 @@ class PolygonFlowProvider(FlowProvider):
         spot = (c.get("underlying_asset", {}) or {}).get("price")
         side = _infer_side(trade.get("price"), quote.get("bid"), quote.get("ask"))
         expiry = datetime.fromisoformat(details["expiration_date"]).replace(tzinfo=timezone.utc)
+        iv = c.get("implied_volatility")
         return FlowEvent(
             source="polygon", external_id=f"{opt_ticker}:{volume}",
             ticker=underlying, contract_type=ContractType(details["contract_type"]),
@@ -100,6 +101,9 @@ class PolygonFlowProvider(FlowProvider):
             # buy as a large ask-side burst.
             is_sweep=bool(side == Side.ASK and delta >= 250),
             is_spread=False, premium=premium, size=delta, spot=spot,
+            iv=float(iv) if iv is not None else None,
+            open_interest=int(oi) if oi else None,
+            vol_oi=vol_oi if oi else None,
             observed_at=datetime.now(timezone.utc), raw={"vol_oi": vol_oi, "oi": oi},
         )
 

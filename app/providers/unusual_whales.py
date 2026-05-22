@@ -17,7 +17,7 @@ from app.config import settings
 from app.core.logging import get_logger
 from app.core.ratelimit import TokenBucket
 from app.providers.base import FlowProvider
-from app.schemas.flow import ContractType, FlowEvent, Side
+from app.schemas.flow import ContractType, FlowEvent, Side, Structure
 
 log = get_logger("provider.uw")
 BASE_URL = "https://api.unusualwhales.com/api"
@@ -120,8 +120,15 @@ def _new_contract() -> dict:
     spot = round(base * random.uniform(0.97, 1.03), 2)        # small daily drift
     inc = _strike_increment(spot)
     strike = _round_to(spot * random.uniform(1.0, 1.12), inc)  # slightly OTM call
-    return {"ticker": ticker, "spot": spot, "strike": strike,
-            "expiry": random.choice(_next_fridays())}
+    return {
+        "ticker": ticker, "spot": spot, "strike": strike,
+        "expiry": random.choice(_next_fridays()),
+        # Per-contract base IV (varies by name) and standing open interest, so
+        # the IV-rank and vol/OI features have something realistic to chew on.
+        "base_iv": round(random.uniform(0.4, 1.6), 3),
+        "oi": random.randint(200, 8000),
+        "cum_size": 0,
+    }
 
 
 async def _synthetic_stream(interval: float) -> AsyncIterator[FlowEvent]:
@@ -148,12 +155,26 @@ async def _synthetic_stream(interval: float) -> AsyncIterator[FlowEvent]:
         # premium ≈ size × contract multiplier × a plausible per-contract price.
         unit_price = max(0.05, c["spot"] * random.uniform(0.01, 0.05))
         premium = round(size * 100 * unit_price, 0)
+        # IV wanders around the contract's base so IV-rank has a distribution.
+        iv = round(max(0.05, c["base_iv"] * random.uniform(0.85, 1.2)), 3)
+        c["cum_size"] += size
+        oi = c["oi"]
+        vol_oi = round(c["cum_size"] / oi, 3) if oi else None
+        is_spread = random.random() > 0.88
+        if is_spread:
+            structure = random.choice([
+                Structure.CALL_VERTICAL, Structure.RISK_REVERSAL,  # bullish
+                Structure.CONDOR, Structure.COLLAR, Structure.UNKNOWN,
+            ])
+        else:
+            structure = Structure.SINGLE
         yield FlowEvent(
             source="unusual_whales", external_id=f"synthetic-{i}",
             ticker=c["ticker"], contract_type=ContractType.CALL,
             strike=c["strike"], expiry=c["expiry"], side=side,
-            is_sweep=sweep, is_spread=random.random() > 0.88,
+            is_sweep=sweep, is_spread=is_spread, structure=structure,
             premium=premium, size=size, spot=c["spot"],
+            iv=iv, open_interest=oi, vol_oi=vol_oi,
             observed_at=datetime.now(timezone.utc),
         )
         await asyncio.sleep(interval)

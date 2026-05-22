@@ -62,9 +62,14 @@ class HistoricalLibrary:
         idx = idx[np.argsort(-cos[idx])]       # sort the k by similarity desc
         return idx, np.clip(cos[idx], 0, 1)
 
+    def _dim_ok(self, x_raw: np.ndarray) -> bool:
+        # Guard against a stale artifact built with a different feature width
+        # (e.g. after FEATURE_COLUMNS changed but before the nightly rebuild).
+        return x_raw.shape[-1] == self.mean.shape[0]
+
     def query(self, x_raw: np.ndarray, k: int = 25) -> float:
         """Outcome-weighted hit-rate of the k nearest historical setups."""
-        if len(self.X) == 0:
+        if len(self.X) == 0 or not self._dim_ok(x_raw):
             return 0.0
         idx, sim = self._neighbors(x_raw, k)
         w = sim / (sim.sum() + 1e-9)
@@ -73,7 +78,7 @@ class HistoricalLibrary:
     def query_with_analogs(self, x_raw: np.ndarray, k: int = 25, top: int = 3):
         """Return (hit_rate, [(label, similarity), ...]) for the closest
         *exploded* historical setups — the named-analog explainability."""
-        if len(self.X) == 0:
+        if len(self.X) == 0 or not self._dim_ok(x_raw):
             return 0.0, []
         idx, sim = self._neighbors(x_raw, k)
         hit = float(np.dot(sim / (sim.sum() + 1e-9), self.exploded[idx]))

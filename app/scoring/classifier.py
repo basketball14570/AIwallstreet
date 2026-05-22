@@ -128,8 +128,11 @@ def classify(
     repeated_sweeps: int = 0,
     regime: Regime = NEUTRAL,
     seq: SequenceFeatures | None = None,
+    follow_through: float = 0.0,
+    iv_rank: float | None = None,
 ) -> tuple[FlowFeatureVector, ScoreResult]:
-    features = build_features(event, ctx, repeated_sweeps=repeated_sweeps, seq=seq)
+    features = build_features(event, ctx, repeated_sweeps=repeated_sweeps, seq=seq,
+                              follow_through=follow_through, iv_rank=iv_rank)
     analogs: list[tuple[str, float]] = []
     lib = _get_library()
     if lib is not None:

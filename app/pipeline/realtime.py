@@ -41,12 +41,23 @@ def flow_payload(flow_id: int, event: FlowEvent, result: ScoreResult) -> dict:
         "premium": event.premium,
         "size": event.size,
         "is_sweep": event.is_sweep,
+        "structure": event.structure.value,
+        "iv": event.iv,
+        "vol_oi": event.vol_oi,
         "spot": event.spot,
         "classification": result.classification.value,
         "confidence": result.confidence,
         "explosion_prob": result.explosion_prob,
         "reasons": result.reasons,
     }
+
+
+def _contract_key(event: FlowEvent) -> str:
+    return f"{event.ticker}:{event.contract_type.value}:{event.strike}:{event.expiry:%Y%m%d}"
+
+
+def _clamp01(x: float) -> float:
+    return max(0.0, min(1.0, x))
 
 
 class SweepTracker:
@@ -59,13 +70,76 @@ class SweepTracker:
     def record(self, event: FlowEvent) -> int:
         if not event.is_sweep:
             return 0
-        key = f"{event.ticker}:{event.contract_type.value}:{event.strike}:{event.expiry:%Y%m%d}"
+        key = _contract_key(event)
         now = time.time()
         dq = self._events[key]
         dq.append(now)
         while dq and now - dq[0] > self.window:
             dq.popleft()
         return len(dq)
+
+
+class IVRankTracker:
+    """Rolling per-ticker IV history -> IV-rank of the current print.
+
+    IV-rank = (iv - min) / (max - min) over the lookback window, the standard
+    'where does today's vol sit in its own recent range' measure. Returns
+    ``None`` when the event carries no IV or there isn't enough history yet, so
+    the feature layer falls back to context / neutral.
+    """
+
+    def __init__(self, window_sec: float = 30 * 86400.0, max_events: int = 500,
+                 min_history: int = 8):
+        self.window = window_sec
+        self.min_history = min_history
+        self._iv: dict[str, deque] = defaultdict(lambda: deque(maxlen=max_events))
+
+    def record(self, event: FlowEvent, now: float | None = None) -> float | None:
+        if event.iv is None:
+            return None
+        now = now if now is not None else time.time()
+        dq = self._iv[event.ticker]
+        while dq and now - dq[0][0] > self.window:
+            dq.popleft()
+        prior = [iv for _, iv in dq]
+        dq.append((now, float(event.iv)))
+        if len(prior) < self.min_history:
+            return None
+        lo, hi = min(prior), max(prior)
+        if hi <= lo:
+            return 0.5
+        return _clamp01((float(event.iv) - lo) / (hi - lo))
+
+
+class FollowThroughTracker:
+    """How much flow on *this exact contract* has already accumulated.
+
+    A contract that prints repeatedly with growing premium is being added to —
+    smart money following through on a thesis. ``record`` returns a 0-1 score
+    derived from the prints that preceded this one, then folds the current print
+    into the rolling window.
+    """
+
+    def __init__(self, window_sec: float = 3 * 86400.0, max_events: int = 500,
+                 premium_target: float = 2_000_000.0):
+        self.window = window_sec
+        self.premium_target = premium_target
+        self._events: dict[str, deque] = defaultdict(lambda: deque(maxlen=max_events))
+
+    def record(self, event: FlowEvent, now: float | None = None) -> float:
+        now = now if now is not None else time.time()
+        dq = self._events[_contract_key(event)]
+        while dq and now - dq[0][0] > self.window:
+            dq.popleft()
+        prior_count = len(dq)
+        prior_premium = sum(p for _, p in dq)
+        dq.append((now, float(event.premium)))
+        if prior_count == 0:
+            return 0.0
+        from app.scoring.normalize import ramp
+        by_count = ramp(prior_count, 1, 5)
+        by_premium = ramp(prior_premium, 100_000, self.premium_target)
+        return _clamp01(0.5 * by_count + 0.5 * by_premium)
 
 
 class Pipeline:
@@ -75,6 +149,8 @@ class Pipeline:
         self.dispatcher = AlertDispatcher()
         self.sweeps = SweepTracker()
         self.sequences = SequenceTracker()
+        self.iv_ranks = IVRankTracker()
+        self.follow = FollowThroughTracker()
         self.regime_provider = RegimeProvider()
 
     async def _persist(self, event: FlowEvent, features, result: ScoreResult) -> int:
@@ -103,6 +179,8 @@ class Pipeline:
                     "ask_side_ratio", "sweep_urgency", "repeated_sweeps", "at_midpoint",
                     "otm_pct", "dte", "rel_options_volume", "stock_rvol", "oi_change_ratio",
                     "float_shares", "short_interest_pct", "borrow_rate", "dealer_gamma",
+                    "iv_rank", "vol_oi", "is_opening", "days_to_earnings",
+                    "bullish_structure", "follow_through", "ticker_hit_rate",
                     "social_score", "news_score", "historical_similarity",
                 )
             }))
@@ -142,8 +220,11 @@ class Pipeline:
         regime = await self.regime_provider.get_regime()
         repeated = self.sweeps.record(event)
         seq = self.sequences.record(event)
+        iv_rank = self.iv_ranks.record(event)
+        follow = self.follow.record(event)
         features, result = classify(event, ctx, repeated_sweeps=repeated,
-                                    regime=regime, seq=seq)
+                                    regime=regime, seq=seq,
+                                    follow_through=follow, iv_rank=iv_rank)
         flow_id = await self._persist(event, features, result)
 
         await publish(FLOW_CHANNEL, flow_payload(flow_id, event, result))

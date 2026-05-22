@@ -17,7 +17,12 @@ from app.core.queue import ack, consume, reclaim_stale
 from app.core.redis_client import FLOW_CHANNEL, publish
 from app.db.base import SessionLocal
 from app.db.models import Alert, FlowFeatures, FlowScore, RawFlow
-from app.pipeline.realtime import SweepTracker, flow_payload
+from app.pipeline.realtime import (
+    FollowThroughTracker,
+    IVRankTracker,
+    SweepTracker,
+    flow_payload,
+)
 from app.scoring.sequence import SequenceTracker
 from app.providers.polygon import PolygonContextProvider
 from app.providers.regime import RegimeProvider
@@ -34,6 +39,8 @@ _FEATURE_COLS = (
     "ask_side_ratio", "sweep_urgency", "repeated_sweeps", "at_midpoint",
     "otm_pct", "dte", "rel_options_volume", "stock_rvol", "oi_change_ratio",
     "float_shares", "short_interest_pct", "borrow_rate", "dealer_gamma",
+    "iv_rank", "vol_oi", "is_opening", "days_to_earnings", "bullish_structure",
+    "follow_through", "ticker_hit_rate",
     "social_score", "news_score", "historical_similarity",
 )
 
@@ -99,6 +106,8 @@ class ScoringConsumer:
         self.dispatcher = AlertDispatcher()
         self.sweeps = SweepTracker()
         self.sequences = SequenceTracker()
+        self.iv_ranks = IVRankTracker()
+        self.follow = FollowThroughTracker()
         self.writer = BatchWriter()
         self._pending_ids: list[str] = []
         self._last_flush = time.monotonic()
@@ -130,8 +139,11 @@ class ScoringConsumer:
         regime = await self.regime_provider.get_regime()
         repeated = self.sweeps.record(event)
         seq = self.sequences.record(event)
+        iv_rank = self.iv_ranks.record(event)
+        follow = self.follow.record(event)
         features, result = classify(event, ctx, repeated_sweeps=repeated,
-                                    regime=regime, seq=seq)
+                                    regime=regime, seq=seq,
+                                    follow_through=follow, iv_rank=iv_rank)
         self.writer.add(event, features, result)
         self._pending_ids.append(msg_id)
 

@@ -86,6 +86,14 @@ class FlowFeatures(Base):
     short_interest_pct: Mapped[float | None] = mapped_column(Float)
     borrow_rate: Mapped[float | None] = mapped_column(Float)
     dealer_gamma: Mapped[float | None] = mapped_column(Float)
+    # Per-contract / underlying screener context
+    iv_rank: Mapped[float] = mapped_column(Float, default=0.5)
+    vol_oi: Mapped[float] = mapped_column(Float, default=0.0)
+    is_opening: Mapped[bool] = mapped_column(Boolean, default=False)
+    days_to_earnings: Mapped[float] = mapped_column(Float, default=999.0)
+    bullish_structure: Mapped[float] = mapped_column(Float, default=0.0)
+    follow_through: Mapped[float] = mapped_column(Float, default=0.0)
+    ticker_hit_rate: Mapped[float] = mapped_column(Float, default=0.0)
     # Catalyst
     social_score: Mapped[float] = mapped_column(Float, default=0.0)
     news_score: Mapped[float] = mapped_column(Float, default=0.0)

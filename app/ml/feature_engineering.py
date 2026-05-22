@@ -23,6 +23,13 @@ FEATURE_COLUMNS = [
     "short_interest_pct",
     "borrow_rate",
     "dealer_gamma",
+    "iv_rank",
+    "vol_oi",
+    "is_opening",
+    "days_to_earnings",
+    "bullish_structure",
+    "follow_through",
+    "ticker_hit_rate",
     "social_score",
     "news_score",
     "historical_similarity",
@@ -38,6 +45,6 @@ def to_matrix(df: pd.DataFrame) -> np.ndarray:
     medians = X.median(numeric_only=True).fillna(0.0)
     X = X.fillna(medians)
     # Log-scale heavy-tailed magnitudes.
-    for col in ("float_shares", "rel_options_volume"):
+    for col in ("float_shares", "rel_options_volume", "vol_oi", "days_to_earnings"):
         X[col] = np.log1p(X[col].clip(lower=0))
     return X.to_numpy(dtype=float)

@@ -108,14 +108,24 @@ flow over the WebSocket with confidence/classification filters and session stats
 
 ## 5. Scoring logic
 
-`app/scoring/engine.py` computes six **component scores** in `[0,1]`:
+`app/scoring/engine.py` computes the following **component scores** in `[0,1]`:
 
-- **conviction** — ask-side ratio, sweep urgency, repeated sweeps, midpoint penalty
-- **volume_confirmation** — relative options volume, stock RVOL, OI change
+- **conviction** — ask-side ratio, sweep urgency, repeated sweeps, midpoint
+  penalty, **per-contract follow-through** (flow that keeps building), and
+  **bullish multi-leg structure** (call verticals / risk reversals)
+- **volume_confirmation** — relative options volume, stock RVOL, OI change, and
+  **per-contract volume/open-interest** (opening vs. closing positioning)
 - **squeeze_fuel** — low float, short interest %, borrow rate, negative dealer gamma
-- **catalyst** — social + news sentiment alignment
+- **catalyst** — social + news sentiment alignment + **earnings proximity**
 - **geometry** — near-dated, slightly-OTM speculative footprint
-- **historical** — similarity to known squeeze setups
+- **iv_value** — paying for relatively **cheap implied vol (low IV-rank)** before
+  a move scores well; chasing rich IV is penalised (and nudges `fake_flow_prob`)
+- **historical** — similarity to known squeeze setups, plus a **per-ticker
+  hit-rate prior** learned nightly from realised outcomes
+
+Multi-leg awareness also reshapes the hedging gate: neutral/protective structures
+(condors, collars, protective puts) are still damped as hedges, while bullish
+verticals and risk reversals are treated as directional positions.
 
 These combine (weights in `ScoringWeights`, tunable/learnable) into four
 **probabilities**:

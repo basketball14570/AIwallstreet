@@ -49,6 +49,8 @@ class Components:
     geometry: float = 0.0
     historical: float = 0.0
     urgency: float = 0.0
+    iv_value: float = 0.0
+    follow_through: float = 0.0
     institutional_hedging: float = 0.0
     reasons: list[str] = field(default_factory=list)
 
@@ -57,8 +59,8 @@ class Components:
             k: round(getattr(self, k), 4)
             for k in (
                 "conviction", "volume_confirmation", "squeeze_fuel", "gamma_squeeze",
-                "catalyst", "geometry", "historical", "urgency",
-                "institutional_hedging",
+                "catalyst", "geometry", "historical", "urgency", "iv_value",
+                "follow_through", "institutional_hedging",
             )
         }
 
@@ -87,6 +89,14 @@ class ScoringEngine:
         s += 0.20 * ramp(f.repeated_sweeps, 1, 5)
         # Sequence corroboration (0 by default -> no effect on snapshot scoring).
         s += 0.12 * clamp(f.seq_cadence_accel) + 0.08 * clamp(f.seq_strike_ladder)
+        # Follow-through: prior flow on this exact contract that kept building.
+        s += 0.15 * clamp(f.follow_through)
+        # A bullish multi-leg structure is a deliberate directional position.
+        if f.bullish_structure >= 1.0:
+            s += 0.10
+            c.reasons.append("Bullish multi-leg structure — directional position, not a hedge")
+        if f.follow_through > 0.5:
+            c.reasons.append("Earlier flow on this contract followed through — position building")
         if f.at_midpoint:
             s *= 0.5
             c.reasons.append("Midpoint fill reduces directional conviction")
@@ -105,11 +115,15 @@ class ScoringEngine:
         opt = ramp(f.rel_options_volume, 2, 10)
         rvol = ramp(f.stock_rvol, 1.5, 5)
         oi = ramp(f.oi_change_ratio, 0.2, 1.5)
-        s = 0.45 * opt + 0.30 * rvol + 0.25 * oi
+        # Per-contract volume swamping open interest = freshly opened position.
+        opening = ramp(f.vol_oi, 1.0, 5.0)
+        s = 0.38 * opt + 0.25 * rvol + 0.20 * oi + 0.17 * opening
         if f.rel_options_volume >= 5:
             c.reasons.append(f"Options volume {f.rel_options_volume:.1f}x normal")
         if f.stock_rvol >= 2:
             c.reasons.append(f"Underlying RVOL {f.stock_rvol:.1f}x confirms interest")
+        if f.is_opening and f.vol_oi >= 2:
+            c.reasons.append(f"Volume {f.vol_oi:.1f}x open interest — new position, not closing")
         return clamp(s)
 
     # ----- gamma squeeze ----------------------------------------------------
@@ -144,12 +158,29 @@ class ScoringEngine:
 
     # ----- catalyst / geometry ---------------------------------------------
     def _catalyst(self, f: FlowFeatureVector, c: Components) -> float:
-        s = 0.6 * clamp(f.social_score) + 0.4 * clamp(f.news_score)
+        # Imminent earnings is itself a known, dated catalyst window. Ramps up
+        # inside ~14 days; 1.0 the day before.
+        earnings = 1.0 - ramp(f.days_to_earnings, 0.0, 14.0) if f.days_to_earnings <= 14 else 0.0
+        s = 0.45 * clamp(f.social_score) + 0.30 * clamp(f.news_score) + 0.25 * earnings
         if f.social_score > 0.6:
             c.reasons.append("Elevated social/retail attention")
         if f.news_score > 0.6:
             c.reasons.append("Fresh news catalyst aligned with flow")
+        if 0 <= f.days_to_earnings <= 7:
+            c.reasons.append(f"Earnings in {f.days_to_earnings:.0f}d — known catalyst window")
         return clamp(s)
+
+    # ----- IV value ---------------------------------------------------------
+    def _iv_value(self, f: FlowFeatureVector, c: Components) -> float:
+        """Reward paying for *relatively cheap* implied vol (low IV-rank) ahead
+        of a move; chasing rich IV (high rank) is poorer risk/reward. iv_rank is
+        0.5 when unknown, which maps to a neutral 0.5 value (no effect)."""
+        val = clamp(1.0 - f.iv_rank)
+        if f.iv_rank <= 0.3 and f.premium > 50_000:
+            c.reasons.append("Buying relatively cheap IV (low IV-rank) ahead of the move")
+        if f.iv_rank >= 0.9:
+            c.reasons.append("Chasing richly-priced IV (high IV-rank) — poorer risk/reward")
+        return val
 
     def _geometry(self, f: FlowFeatureVector, c: Components) -> float:
         otm = clamp(1.0 - abs(f.otm_pct - 0.07) / 0.15)  # peak ~ +7% OTM
@@ -168,6 +199,7 @@ class ScoringEngine:
             s += 0.25  # bid-side / sold
         s += 0.25 * (1 - ramp(f.rel_options_volume, 1, 5))  # no volume backing
         s += 0.15 * (1 - f.sweep_urgency)
+        s += 0.15 * ramp(f.iv_rank, 0.85, 1.0)  # chasing very rich IV
         prob = clamp(s)
         if prob > 0.6:
             c.reasons.append("Pattern resembles low-quality / noise flow")
@@ -178,14 +210,20 @@ class ScoringEngine:
         spreads (collars/risk-reversals), protective puts on mega-caps, passive
         midpoint/bid fills with no catalyst."""
         s = 0.0
+        passive = f.ask_side_ratio <= 0.5  # mid or bid
         if f.is_spread:
-            s += 0.40  # multi-leg structures are overwhelmingly hedges
+            # Multi-leg: only neutral/protective shapes look like hedges now.
+            # A bullish vertical / risk-reversal is a directional bet, so it is
+            # barely penalised — this stops us discarding real bullish spreads.
+            s += 0.05 if f.bullish_structure >= 1.0 else 0.40
         big_cap = (f.float_shares or 0) > 500_000_000
         if f.is_put and big_cap and abs(f.otm_pct) < 0.05:
             s += 0.30  # protective put near the money on a large name
-        passive = f.ask_side_ratio <= 0.5  # mid or bid
         if passive and f.premium > 500_000 and f.dte > 30:
             s += 0.20  # big, patient, far-dated, not lifting offers
+        # Large, passive flow right into earnings is usually a hedge / vol play.
+        if passive and f.days_to_earnings <= 7 and f.premium > 250_000:
+            s += 0.15
         if (f.social_score + f.news_score) < 0.4:
             s += 0.10  # no catalyst to justify a speculative bet
         prob = clamp(s)
@@ -204,6 +242,10 @@ class ScoringEngine:
         c.catalyst = self._catalyst(f, c)
         c.geometry = self._geometry(f, c)
         c.historical = clamp(f.historical_similarity)
+        c.iv_value = self._iv_value(f, c)
+        c.follow_through = clamp(f.follow_through)
+        if f.ticker_hit_rate >= 0.55:
+            c.reasons.append(f"Underlying has a high historical hit-rate ({f.ticker_hit_rate:.0%})")
 
         fake = self._fake_flow_prob(f, c)
         hedge = self._institutional_hedging(f, c)
@@ -232,7 +274,13 @@ class ScoringEngine:
         # Explosion = corroboration across the three independent legs (soft-AND),
         # lifted by catalyst/history, then damped. One strong leg cannot trigger.
         core = soft_and(c.conviction, c.volume_confirmation, c.squeeze_fuel)
-        boost = 0.7 + 0.3 * max(c.catalyst, c.historical, c.geometry)
+        # Lift from any single corroborating axis: catalyst, history, geometry,
+        # cheap IV, or a strong per-ticker prior. iv_value is 0.5 at the neutral/
+        # unknown point, so remap to [0,1] where only cheap vol (rank<0.5) lifts.
+        iv_lift = clamp((c.iv_value - 0.5) * 2.0)
+        boost = 0.7 + 0.3 * max(
+            c.catalyst, c.historical, c.geometry, iv_lift, clamp(f.ticker_hit_rate)
+        )
         explosion = clamp(core * boost * damp)
 
         probs = {

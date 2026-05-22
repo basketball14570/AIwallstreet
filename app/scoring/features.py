@@ -45,17 +45,45 @@ def _sweep_urgency(event: FlowEvent) -> float:
     return min(score, 1.0)
 
 
+def _vol_oi(event: FlowEvent) -> float:
+    """Day-volume / open-interest, finite and capped. >1 means today's volume
+    exceeds the standing open interest — a clean 'new positioning' tell."""
+    vo = event.vol_oi
+    if vo is None and event.open_interest:
+        vo = event.size / event.open_interest if event.open_interest else None
+    if vo is None:
+        return 0.0
+    if vo == float("inf"):
+        vo = 50.0
+    return min(max(vo, 0.0), 50.0)
+
+
 def build_features(
     event: FlowEvent,
     ctx: MarketContext | None,
     repeated_sweeps: int = 0,
     now: datetime | None = None,
     seq: SequenceFeatures | None = None,
+    follow_through: float = 0.0,
+    iv_rank: float | None = None,
 ) -> FlowFeatureVector:
     ctx = ctx or MarketContext(ticker=event.ticker)
     seq = seq or SequenceFeatures()
     ask_side_ratio = 1.0 if event.side == Side.ASK else (0.5 if event.side == Side.MID else 0.0)
+    vol_oi = _vol_oi(event)
+    # iv_rank precedence: explicit tracker value > context value > unknown (0.5).
+    iv_rank_val = iv_rank if iv_rank is not None else ctx.iv_rank
+    if iv_rank_val is None:
+        iv_rank_val = 0.5
+    dte_earnings = ctx.days_to_earnings if ctx.days_to_earnings is not None else 999.0
     return FlowFeatureVector(
+        iv_rank=iv_rank_val,
+        vol_oi=vol_oi,
+        is_opening=vol_oi >= 1.0,
+        days_to_earnings=dte_earnings,
+        bullish_structure=1.0 if event.is_bullish_structure else 0.0,
+        follow_through=max(0.0, min(follow_through, 1.0)),
+        ticker_hit_rate=ctx.ticker_hit_rate or 0.0,
         seq_cadence_accel=seq.cadence_accel,
         seq_strike_ladder=seq.strike_ladder,
         seq_premium_velocity=seq.premium_velocity,

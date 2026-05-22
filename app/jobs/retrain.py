@@ -22,6 +22,7 @@ from app.db.models import FlowFeatures, FlowScore, Outcome, RawFlow
 from app.ml.calibrate import fit_from_arrays
 from app.ml.feature_engineering import FEATURE_COLUMNS
 from app.ml.train import train
+from app.scoring.priors import TickerPriors, shrink_hit_rate
 from app.scoring.similarity import HistoricalLibrary
 
 log = get_logger("retrain")
@@ -40,6 +41,19 @@ def build_library(feat_df: pd.DataFrame, labels: np.ndarray) -> HistoricalLibrar
             for t, d in zip(feat_df["ticker"], feat_df["observed_at"])
         ]
     return HistoricalLibrary.fit(X, labels, analog_labels)
+
+
+def build_ticker_priors(df: pd.DataFrame) -> TickerPriors:
+    """Per-ticker shrunk hit-rate from the labelled training frame."""
+    if "ticker" not in df.columns or df.empty:
+        return TickerPriors()
+    global_rate = float(df["label"].mean())
+    rates: dict[str, float] = {}
+    for ticker, grp in df.groupby("ticker"):
+        rates[str(ticker).upper()] = round(
+            shrink_hit_rate(int(grp["label"].sum()), int(len(grp)), global_rate), 4
+        )
+    return TickerPriors(rates=rates, global_rate=round(global_rate, 4))
 
 
 async def _load_training_frame(session) -> pd.DataFrame:
@@ -80,9 +94,13 @@ async def retrain() -> dict:
         scores, labels = await _load_calibration_pairs(session)
         cal = fit_from_arrays(scores, labels) if scores else {"skipped": "no scores"}
 
+        priors = build_ticker_priors(df)
+        priors.save()
+
         log.info("retrain complete", **metrics)
         return {"model": metrics, "calibration": cal,
-                "library_size": int(len(lib.X))}
+                "library_size": int(len(lib.X)),
+                "ticker_priors": len(priors.rates)}
 
 
 async def _main() -> None:
