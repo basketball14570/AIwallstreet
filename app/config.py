@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # Flow source: auto (polygon if key else synthetic) | synthetic | polygon | unusual_whales
+    flow_provider: str = "auto"
+    # Tickers to scan for unusual options flow (Polygon provider).
+    watch_tickers: str = "TSLA,NVDA,AAPL,AMD,PLTR,SOFI,GME,AMC,MARA,RIVN"
+    polygon_flow_poll_sec: float = 30.0
+    # Minimum day-volume/open-interest ratio for a contract to count as unusual.
+    flow_min_vol_oi: float = 0.8
+    # Minimum total premium ($) for a synthesised flow event.
+    flow_min_premium: float = 25_000.0
+
     # Behaviour
     alert_min_confidence: float = 70.0
     # Which classifications may fire an alert. Comma-separated; blank = any.
