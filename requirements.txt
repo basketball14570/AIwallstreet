@@ -1,0 +1,17 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+pydantic-settings==2.5.2
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.29.0
+alembic==1.13.3
+redis==5.0.8
+httpx==0.27.2
+websockets==13.0
+python-dotenv==1.0.1
+numpy==2.1.1
+pandas==2.2.3
+scikit-learn==1.5.2
+joblib==1.4.2
+structlog==24.4.0
+tenacity==9.0.0
