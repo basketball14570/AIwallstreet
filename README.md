@@ -154,11 +154,20 @@ Run the demo (synthetic data, no DB needed): `python -m app.ml.train`.
 
 ## 7. Real-time processing flow
 
-`app/pipeline/realtime.py`:
-`stream → enrich context (cached in Redis) → SweepTracker (repeated-sweep
-detection over a 10-min window) → build features → classify → persist
-(raw_flow + flow_features + flow_score) → publish to Redis → dispatch alerts if
-confidence ≥ threshold → record alert`.
+Two deployment shapes share the same scoring code:
+
+* **Simple (MVP)** — `app/pipeline/realtime.py`: in-process
+  `stream → enrich → SweepTracker → classify → persist → publish → alert`.
+* **Production (event-driven)** — decoupled producer/consumer over **Redis
+  Streams**:
+  * `app/pipeline/ingest.py` — provider stream → `enqueue()` (durable, absorbs
+    backpressure; rate-limited via `app/core/ratelimit.py` token buckets).
+  * `app/pipeline/consumer.py` — consumer group → enrich → classify →
+    **batched** DB writes (`BatchWriter`, one txn per batch) → publish → alert →
+    ack. Crash-safe: pending entries are re-claimed via `XAUTOCLAIM`.
+
+Run modes via `WORKER_MODE=all|ingest|consumer python -m app.worker`; scale
+consumers horizontally in the `scorers` group.
 
 ---
 

@@ -17,6 +17,21 @@ from app.scoring.features import build_features
 
 _engine = ScoringEngine()
 
+# Optional historical k-NN library; populated lazily from disk if present.
+_LIBRARY_PATH = "models/historical_library.npz"
+_library = None
+_library_loaded = False
+
+
+def _get_library():
+    global _library, _library_loaded
+    if not _library_loaded:
+        from app.scoring.similarity import HistoricalLibrary
+
+        _library = HistoricalLibrary.load(_LIBRARY_PATH)
+        _library_loaded = True
+    return _library
+
 
 def _confidence(probs: dict[str, float], components) -> float:
     """0-100. Blends the strongest bullish probability with evidence breadth."""
@@ -81,4 +96,9 @@ def classify(
     repeated_sweeps: int = 0,
 ) -> tuple[FlowFeatureVector, ScoreResult]:
     features = build_features(event, ctx, repeated_sweeps=repeated_sweeps)
+    lib = _get_library()
+    if lib is not None:
+        from app.scoring.similarity import vector_from_features
+
+        features.historical_similarity = lib.query(vector_from_features(features))
     return features, classify_features(features)

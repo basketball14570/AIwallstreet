@@ -15,6 +15,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import settings
 from app.core.logging import get_logger
+from app.core.ratelimit import TokenBucket
 from app.providers.base import FlowProvider
 from app.schemas.flow import ContractType, FlowEvent, Side
 
@@ -25,12 +26,14 @@ BASE_URL = "https://api.unusualwhales.com/api"
 class UnusualWhalesProvider(FlowProvider):
     name = "unusual_whales"
 
-    def __init__(self, poll_interval: float = 5.0):
+    def __init__(self, poll_interval: float = 5.0, rate_per_min: float = 120):
         self.poll_interval = poll_interval
         self._seen: set[str] = set()
+        self._bucket = TokenBucket(rate=rate_per_min / 60.0, capacity=rate_per_min / 6.0)
 
     @retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=2, max=16))
     async def _fetch(self, client: httpx.AsyncClient) -> list[dict]:
+        await self._bucket.acquire()
         resp = await client.get(
             f"{BASE_URL}/option-trades/flow-alerts",
             headers={"Authorization": f"Bearer {settings.unusual_whales_api_key}"},

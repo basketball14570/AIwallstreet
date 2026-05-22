@@ -31,8 +31,13 @@ FEATURE_COLUMNS = [
 
 def to_matrix(df: pd.DataFrame) -> np.ndarray:
     X = df.reindex(columns=FEATURE_COLUMNS).copy()
-    X["at_midpoint"] = X["at_midpoint"].astype(float)
-    # Log-scale heavy-tailed magnitudes; impute missing with column median.
+    # Coerce everything numeric (bools -> 0/1, None -> NaN).
+    for col in FEATURE_COLUMNS:
+        X[col] = pd.to_numeric(X[col], errors="coerce")
+    # Impute missing with column median (0 when no data, e.g. single-row infer).
+    medians = X.median(numeric_only=True).fillna(0.0)
+    X = X.fillna(medians)
+    # Log-scale heavy-tailed magnitudes.
     for col in ("float_shares", "rel_options_volume"):
         X[col] = np.log1p(X[col].clip(lower=0))
-    return X.fillna(X.median(numeric_only=True)).to_numpy(dtype=float)
+    return X.to_numpy(dtype=float)

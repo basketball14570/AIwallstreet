@@ -13,6 +13,7 @@ import httpx
 
 from app.config import settings
 from app.core.logging import get_logger
+from app.core.ratelimit import TokenBucket
 from app.core.redis_client import get_redis
 from app.providers.base import ContextProvider
 from app.providers.sentiment import SentimentProvider
@@ -23,8 +24,10 @@ CACHE_TTL = 300  # seconds
 
 
 class PolygonContextProvider(ContextProvider):
-    def __init__(self, sentiment: SentimentProvider | None = None):
+    def __init__(self, sentiment: SentimentProvider | None = None,
+                 rate_per_min: float = 300):
         self.sentiment = sentiment or SentimentProvider()
+        self._bucket = TokenBucket(rate=rate_per_min / 60.0, capacity=rate_per_min / 6.0)
 
     async def get_context(self, ticker: str) -> MarketContext:
         cache_key = f"ctx:{ticker}"
@@ -46,6 +49,7 @@ class PolygonContextProvider(ContextProvider):
     async def _fetch(self, ticker: str) -> MarketContext:
         async with httpx.AsyncClient(timeout=15) as client:
             try:
+                await self._bucket.acquire()
                 # Snapshot for relative volume.
                 snap = await client.get(
                     f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}",
