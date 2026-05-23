@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from app.alerts.base import AlertDispatcher
+from app.alerts.base import AlertDispatcher, AlertGate
 from app.alerts.summary import generate_summary
 from app.core.logging import get_logger
 from app.core.queue import ack, consume, reclaim_stale
@@ -104,6 +104,7 @@ class ScoringConsumer:
         self.context = PolygonContextProvider()
         self.regime_provider = RegimeProvider()
         self.dispatcher = AlertDispatcher()
+        self.alert_gate = AlertGate()
         self.sweeps = SweepTracker()
         self.sequences = SequenceTracker()
         self.iv_ranks = IVRankTracker()
@@ -116,7 +117,8 @@ class ScoringConsumer:
         written = await self.writer.flush()
         for flow_id, event, features, result in written:
             await publish(FLOW_CHANNEL, flow_payload(flow_id, event, result, features))
-            if self.dispatcher.should_alert(result, event, features):
+            if (self.dispatcher.should_alert(result, event, features)
+                    and self.alert_gate.allow(event)):
                 channels = await self.dispatcher.dispatch(event, result, features)
                 await self._record_alert(flow_id, event, result, channels)
         if self._pending_ids:

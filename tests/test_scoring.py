@@ -72,7 +72,7 @@ def test_unknown_side_unusual_flow_not_fake_and_alerts():
     from app.alerts.base import AlertDispatcher
 
     ev = _event(side=None, is_sweep=False, premium=900_000, size=3000,
-                open_interest=300, vol_oi=4.0)
+                open_interest=300, vol_oi=6.0)
     feats, result = classify(ev, MarketContext(ticker="GME"))
     assert feats.aggressor_known is False
     assert result.fake_flow_prob < 0.6          # unknown side != sold
@@ -87,6 +87,24 @@ def test_known_bid_side_still_penalised():
                          MarketContext(ticker="GME", rel_options_volume=1.0))
     assert result.classification in {Classification.NORMAL, Classification.FAKE,
                                      Classification.HEDGING}
+
+
+def test_alert_gate_suppresses_then_cooldowns(monkeypatch):
+    """Startup grace blocks the boot-time backlog; after grace a contract alerts
+    once, then is cooled down."""
+    import app.alerts.base as base
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "alert_startup_grace_sec", 0.0)
+    monkeypatch.setattr(settings, "alert_cooldown_min", 60.0)
+    gate = base.AlertGate()
+    ev = _event()
+    assert gate.allow(ev) is True       # first one passes
+    assert gate.allow(ev) is False      # same contract is cooled down
+
+    # A fresh gate still in its grace window suppresses everything.
+    monkeypatch.setattr(settings, "alert_startup_grace_sec", 9999.0)
+    assert base.AlertGate().allow(ev) is False
 
 
 def test_probabilities_in_range():

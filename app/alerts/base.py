@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from app.alerts.discord import DiscordAlerter
 from app.alerts.summary import generate_summary
@@ -20,6 +21,31 @@ def _is_otm_call(event: FlowEvent) -> bool:
     if event.spot is None:
         return True
     return event.strike > event.spot
+
+
+class AlertGate:
+    """Anti-spam for the live pipeline. Lives in the long-running consumer (not
+    in should_alert, so the API test endpoint always sends). Two jobs:
+    1. Startup grace — on boot the scanner sees the whole day's accumulated
+       volume at once; suppress alerts during the grace window so that backlog
+       populates the dashboard without spamming, and only new activity alerts.
+    2. Per-contract cooldown — a single busy contract can't alert repeatedly."""
+
+    def __init__(self):
+        self._started = time.monotonic()
+        self._last: dict[str, float] = {}
+
+    def allow(self, event: FlowEvent) -> bool:
+        now = time.monotonic()
+        if now - self._started < settings.alert_startup_grace_sec:
+            return False
+        key = (f"{event.ticker}:{event.contract_type.value}:"
+               f"{event.strike}:{event.expiry:%Y%m%d}")
+        last = self._last.get(key)
+        if last is not None and now - last < settings.alert_cooldown_min * 60.0:
+            return False
+        self._last[key] = now
+        return True
 
 
 class AlertDispatcher:

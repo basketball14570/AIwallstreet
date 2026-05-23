@@ -66,9 +66,15 @@ class Settings(BaseSettings):
     # confidence score. This is the path that works on data plans WITHOUT
     # option quotes/trades, where bought-vs-sold conviction can't be computed.
     alert_on_unusual_activity: bool = True
-    alert_unusual_vol_oi: float = 3.0          # day volume >= 3x open interest
-    alert_unusual_premium: float = 250_000.0   # min total premium ($)
+    alert_unusual_vol_oi: float = 5.0          # day volume >= 5x open interest
+    alert_unusual_premium: float = 500_000.0   # min total premium ($)
     alert_unusual_dte_max: float = 60.0        # near-dated only (calendar days)
+    # Anti-spam. On startup the scanner sees the whole day's accumulated volume
+    # at once; the grace window lets that backlog populate the dashboard WITHOUT
+    # firing alerts, so only genuinely new activity after start alerts. The
+    # cooldown stops one busy contract from alerting over and over.
+    alert_startup_grace_sec: float = 120.0
+    alert_cooldown_min: float = 360.0          # don't re-alert a contract for 6h
     env: str = "dev"
     log_level: str = "INFO"
 

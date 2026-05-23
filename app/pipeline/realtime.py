@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from collections import defaultdict, deque
 
-from app.alerts.base import AlertDispatcher
+from app.alerts.base import AlertDispatcher, AlertGate
 from app.core.logging import get_logger
 from app.core.redis_client import FLOW_CHANNEL, publish
 from app.db.base import SessionLocal
@@ -157,6 +157,7 @@ class Pipeline:
         self.provider = UnusualWhalesProvider()
         self.context = PolygonContextProvider()
         self.dispatcher = AlertDispatcher()
+        self.alert_gate = AlertGate()
         self.sweeps = SweepTracker()
         self.sequences = SequenceTracker()
         self.iv_ranks = IVRankTracker()
@@ -239,7 +240,8 @@ class Pipeline:
 
         await publish(FLOW_CHANNEL, flow_payload(flow_id, event, result, features))
 
-        if self.dispatcher.should_alert(result, event, features):
+        if (self.dispatcher.should_alert(result, event, features)
+                and self.alert_gate.allow(event)):
             channels = await self.dispatcher.dispatch(event, result, features)
             await self._record_alert(flow_id, event, result, channels)
             log.info("ALERT", ticker=event.ticker,
