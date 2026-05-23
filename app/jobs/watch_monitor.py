@@ -81,8 +81,12 @@ class WatchlistMonitor:
         if prev is None:
             return  # establish baseline first; no alert on the first read
 
+        approach = settings.watchlist_approach_pct / 100.0
         for kind, value, label in await self._levels(ticker):
+            if value <= 0:
+                continue
             key = f"{ticker}:{value:.2f}"
+            ak = f"{key}:approach"
             # Resistance: alert when price crosses UP through it (breakout).
             if kind == "resistance" and prev < value <= price and not self._cooled(key):
                 self._last_alert[key] = time.monotonic()
@@ -97,6 +101,18 @@ class WatchlistMonitor:
                     f"PRICE ALERT — {ticker} crossed BELOW ${value:,.2f} ({label})\n"
                     f"Now ${price:,.2f}. Losing a support floor is often a bearish "
                     "warning sign.\nEducational information, not financial advice.")
+            # Heads-up: just entered the approach band (within X%) without crossing.
+            elif (abs(price - value) / value <= approach
+                  and abs(prev - value) / value > approach
+                  and not self._cooled(ak)):
+                self._last_alert[ak] = time.monotonic()
+                away = abs(price - value) / value * 100.0
+                watch = ("a breakout or a rejection" if kind == "resistance"
+                         else "a bounce or a breakdown")
+                await self._broadcast(
+                    f"HEADS UP — {ticker} approaching ${value:,.2f} ({label})\n"
+                    f"Now ${price:,.2f} ({away:.1f}% away). Watch for {watch}.\n"
+                    "Educational information, not financial advice.")
 
     async def run(self) -> None:
         log.info("watchlist monitor starting", interval=settings.watchlist_poll_sec)

@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     # Watchlist price alerts: poll your watchlist this often and ping when a name
     # crosses its breakout (resistance) or breakdown (support) level.
     watchlist_poll_sec: float = 300.0
+    # "Approaching a level" heads-up: ping when price comes within this % of a
+    # watched level (chart or analyst), before it actually crosses.
+    watchlist_approach_pct: float = 0.5
     # Trade-idea journal. public_base_url is the address your phone can reach the
     # app at — it's used to build the clickable "Add to journal" link in alerts
     # (set it to your LAN IP or a tunnel URL so the link works off-machine).

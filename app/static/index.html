@@ -134,6 +134,7 @@
       <div class="tab" data-tab="analyze">Analyze stock</div>
       <div class="tab" data-tab="journal">Journal</div>
       <div class="tab" data-tab="levels">Analyst levels</div>
+      <div class="tab" data-tab="watchlist">Watchlist</div>
     </div>
 
     <!-- LIVE -->
@@ -207,6 +208,25 @@
         <table>
           <thead><tr><th>Ticker</th><th>Resistance (above)</th><th>Support (below)</th><th class="num">CLB36</th><th class="num">Wkly CPL</th><th></th></tr></thead>
           <tbody id="lvRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- WATCHLIST -->
+    <div class="view" id="view-watchlist">
+      <div class="searchbar">
+        <div class="muted" style="margin-bottom:8px">Tickers here are monitored for price crossings of their chart &amp; analyst levels, plus a heads-up when price gets within ~0.5% of one.</div>
+        <div style="display:flex;gap:8px">
+          <input id="wlTicker" placeholder="Ticker (e.g. NVDA)" style="flex:0 0 160px;text-transform:uppercase" />
+          <input id="wlNote" placeholder="Optional note" style="flex:1" />
+          <button id="wlAdd" style="background:var(--blue);color:#04101f;border:none;border-radius:6px;padding:7px 16px;font:inherit;font-weight:700;cursor:pointer">Add</button>
+        </div>
+        <div id="wlMsg" class="muted" style="margin-top:6px"></div>
+      </div>
+      <div class="feed">
+        <table>
+          <thead><tr><th>Ticker</th><th>Note</th><th></th></tr></thead>
+          <tbody id="wlRows"></tbody>
         </table>
       </div>
     </div>
@@ -562,6 +582,43 @@ async function importLevels(){
 }
 document.getElementById('lvImport').addEventListener('click', importLevels);
 
+// ---- Watchlist ----
+async function loadWatchlist(){
+  try {
+    const rows = await (await fetch('/watchlist')).json();
+    const tb = document.getElementById('wlRows');
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="3" class="muted" style="padding:16px">No tickers yet. Add one above to start monitoring its levels.</td></tr>'; return; }
+    tb.innerHTML = rows.map(w => `
+      <tr>
+        <td class="tk">${w.ticker}</td>
+        <td class="muted">${w.note||''}</td>
+        <td class="num"><span style="cursor:pointer;color:var(--muted)" onclick="deleteWatchlist('${w.ticker}')">✕</span></td>
+      </tr>`).join('');
+  } catch (e) {}
+}
+async function deleteWatchlist(t){
+  await fetch('/watchlist/'+encodeURIComponent(t), { method:'DELETE' });
+  loadWatchlist();
+}
+async function addWatchlist(){
+  const ticker = document.getElementById('wlTicker').value.trim().toUpperCase();
+  const note = document.getElementById('wlNote').value.trim();
+  const msg = document.getElementById('wlMsg');
+  if (!ticker) { msg.textContent = 'Enter a ticker first.'; return; }
+  try {
+    const r = await fetch('/watchlist', { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ticker, note: note||null }) });
+    if (r.status === 409) { msg.textContent = ticker+' is already on the watchlist.'; return; }
+    if (!r.ok) { msg.textContent = 'Could not add '+ticker+'.'; return; }
+    msg.textContent = 'Added '+ticker+'.';
+    document.getElementById('wlTicker').value = '';
+    document.getElementById('wlNote').value = '';
+    loadWatchlist();
+  } catch (e) { msg.textContent = 'Could not add '+ticker+'.'; }
+}
+document.getElementById('wlAdd').addEventListener('click', addWatchlist);
+document.getElementById('wlTicker').addEventListener('keydown', e => { if (e.key==='Enter') addWatchlist(); });
+
 // ---- Tabs + polling ----
 let activeTab = 'live', poll = null;
 function setTab(name) {
@@ -573,6 +630,7 @@ function setTab(name) {
   if (name === 'contracts') { loadContracts(); poll = setInterval(loadContracts, 5000); }
   if (name === 'journal')   { loadJournal();   poll = setInterval(loadJournal, 15000); }
   if (name === 'levels')    { loadLevels(); }
+  if (name === 'watchlist') { loadWatchlist(); }
   if (name === 'analyze')   { document.getElementById('anInput').focus(); }
 }
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
