@@ -223,12 +223,7 @@
         </div>
         <div id="wlMsg" class="muted" style="margin-top:6px"></div>
       </div>
-      <div class="feed">
-        <table>
-          <thead><tr><th>Ticker</th><th>Note</th><th></th></tr></thead>
-          <tbody id="wlRows"></tbody>
-        </table>
-      </div>
+      <div class="feed" id="wlCards" style="padding:14px"></div>
     </div>
 
     <!-- ANALYZE -->
@@ -583,18 +578,37 @@ async function importLevels(){
 document.getElementById('lvImport').addEventListener('click', importLevels);
 
 // ---- Watchlist ----
+function levelRow(l){
+  const above = l.side === 'above';
+  const cls = above ? 'an-down' : 'an-up';   // above=resistance(red), below=support(green)
+  const dist = l.dist_pct==null ? '' : `${l.dist_pct>0?'+':''}${l.dist_pct}%`;
+  const star = l.nearest ? ' ◀ nearest' : '';
+  return `<div class="an-row" style="font-size:12px${l.nearest?';font-weight:700':''}">
+    <span>${above?'▲':'▼'} ${money(l.value)} <span class="muted">${l.label}</span></span>
+    <b class="${cls}">${dist}<span class="muted" style="font-weight:400">${star}</span></b>
+  </div>`;
+}
 async function loadWatchlist(){
+  const box = document.getElementById('wlCards');
+  box.innerHTML = '<span class="muted">Loading prices &amp; levels…</span>';
   try {
-    const rows = await (await fetch('/watchlist')).json();
-    const tb = document.getElementById('wlRows');
-    if (!rows.length) { tb.innerHTML = '<tr><td colspan="3" class="muted" style="padding:16px">No tickers yet. Add one above to start monitoring its levels.</td></tr>'; return; }
-    tb.innerHTML = rows.map(w => `
-      <tr>
-        <td class="tk">${w.ticker}</td>
-        <td class="muted">${w.note||''}</td>
-        <td class="num"><span style="cursor:pointer;color:var(--muted)" onclick="deleteWatchlist('${w.ticker}')">✕</span></td>
-      </tr>`).join('');
-  } catch (e) {}
+    const rows = await (await fetch('/watchlist/overview')).json();
+    if (!rows.length) { box.innerHTML = '<span class="muted">No tickers yet. Add one above to start monitoring its levels.</span>'; return; }
+    box.innerHTML = `<div class="an-grid">` + rows.map(w => {
+      const px = w.current!=null ? w.current : w.prev_close;
+      const levels = (w.levels||[]).length
+        ? w.levels.map(levelRow).join('')
+        : '<div class="an-row muted" style="font-size:12px">No levels yet — analyze the stock or import analyst levels.</div>';
+      return `<div class="an-card">
+        <div class="an-row" style="margin-bottom:6px">
+          <span><b class="tk" style="font-size:15px">${w.ticker}</b> <span class="muted">${money(px)}</span></span>
+          <span style="cursor:pointer;color:var(--muted)" onclick="deleteWatchlist('${w.ticker}')">✕</span>
+        </div>
+        ${w.note?`<div class="muted" style="font-size:11px;margin-bottom:6px">${w.note}</div>`:''}
+        ${levels}
+      </div>`;
+    }).join('') + `</div>`;
+  } catch (e) { box.innerHTML = '<span class="muted">Could not load watchlist.</span>'; }
 }
 async function deleteWatchlist(t){
   await fetch('/watchlist/'+encodeURIComponent(t), { method:'DELETE' });
