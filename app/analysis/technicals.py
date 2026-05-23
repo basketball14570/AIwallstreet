@@ -52,6 +52,23 @@ def _sma(close: pd.Series, n: int) -> float | None:
     return round(float(close.tail(n).mean()), 2) if len(close) >= n else None
 
 
+def _atr(bars: pd.DataFrame, period: int = 14) -> float | None:
+    """Average True Range — the stock's typical daily dollar range."""
+    if len(bars) < period + 1:
+        return None
+    h, l, prev_c = bars["high"], bars["low"], bars["close"].shift(1)
+    true_range = pd.concat([h - l, (h - prev_c).abs(), (l - prev_c).abs()],
+                           axis=1).max(axis=1)
+    return round(float(true_range.tail(period).mean()), 2)
+
+
+def _pct_change(close: pd.Series, n: int) -> float | None:
+    """Percent change vs n trading days ago."""
+    if len(close) <= n or close.iloc[-1 - n] == 0:
+        return None
+    return round(float(close.iloc[-1] / close.iloc[-1 - n] - 1) * 100, 2)
+
+
 @dataclass
 class TechnicalRead:
     ticker: str
@@ -74,6 +91,15 @@ class TechnicalRead:
     breakout_above: float | None
     breakdown_below: float | None
     upside_target: float | None
+    atr: float | None
+    typical_move_pct: float | None
+    chg_1d: float | None
+    chg_1w: float | None
+    chg_1m: float | None
+    rel_volume: float | None
+    high_52w: float | None
+    low_52w: float | None
+    pct_from_high: float | None
     notes: list[str]
 
 
@@ -115,6 +141,23 @@ async def analyze(ticker: str) -> dict:
     breakdown_below = supports[0] if supports else range_low
     upside_target = resistances[1] if len(resistances) > 1 else range_high
 
+    # Volatility, performance, activity, 52-week context.
+    atr = _atr(bars)
+    typical_move_pct = round(atr / spot * 100, 1) if atr and spot else None
+    chg_1d = _pct_change(close, 1)
+    chg_1w = _pct_change(close, 5)
+    chg_1m = _pct_change(close, 21)
+    rel_volume = None
+    if "volume" in bars and len(bars) >= 20:
+        avg_vol = float(bars["volume"].tail(20).mean())
+        if avg_vol > 0:
+            rel_volume = round(float(bars["volume"].iloc[-1]) / avg_vol, 2)
+    window_52w = bars.tail(252)
+    high_52w = round(float(window_52w["high"].max()), 2)
+    low_52w = round(float(window_52w["low"].min()), 2)
+    pct_from_high = (round((spot - high_52w) / high_52w * 100, 1)
+                     if high_52w else None)
+
     # Trend read.
     if sma50 and sma200:
         if spot > sma50 > sma200:
@@ -151,6 +194,16 @@ async def analyze(ticker: str) -> dict:
     if supports:
         notes.append(f"Nearest support ${supports[0]:,.2f} "
                      f"({(supports[0]-spot)/spot:+.1%}) — a break below is bearish")
+    if atr:
+        notes.append(f"Typical daily move ±${atr:,.2f} ({typical_move_pct}%) — "
+                     "use it to judge if a target is reachable and where to set a stop")
+    if rel_volume is not None:
+        vol_word = ("unusually active" if rel_volume >= 2 else "quiet"
+                    if rel_volume < 0.7 else "normal")
+        notes.append(f"Volume is {rel_volume}x its 20-day average ({vol_word})")
+    if pct_from_high is not None:
+        notes.append(f"{abs(pct_from_high)}% below its 52-week high "
+                     f"(${high_52w:,.2f})")
 
     read = TechnicalRead(
         ticker=ticker, spot=spot, data_source=source, trend=trend,
@@ -160,6 +213,11 @@ async def analyze(ticker: str) -> dict:
         supports=supports, resistances=resistances,
         range_high=range_high, range_low=range_low,
         breakout_above=breakout_above, breakdown_below=breakdown_below,
-        upside_target=upside_target, notes=notes,
+        upside_target=upside_target,
+        atr=atr, typical_move_pct=typical_move_pct,
+        chg_1d=chg_1d, chg_1w=chg_1w, chg_1m=chg_1m,
+        rel_volume=rel_volume, high_52w=high_52w, low_52w=low_52w,
+        pct_from_high=pct_from_high,
+        notes=notes,
     )
     return asdict(read)

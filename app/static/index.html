@@ -355,6 +355,11 @@ function maRow(label, v, spot){
   const cls = spot>=v ? 'an-up' : 'an-down';
   return `<div class="an-row"><span>${label}</span><b class="${cls}">${money(v)}</b></div>`;
 }
+function pctRow(label, v){
+  if (v==null) return `<div class="an-row"><span>${label}</span><b>—</b></div>`;
+  const cls = v>0 ? 'an-up' : v<0 ? 'an-down' : 'an-neutral';
+  return `<div class="an-row"><span>${label}</span><b class="${cls}">${v>0?'+':''}${v}%</b></div>`;
+}
 async function loadAnalysis(ticker){
   const box = document.getElementById('anResult');
   if (!ticker) { box.innerHTML = '<span class="muted">Type a ticker above and press Enter.</span>'; return; }
@@ -385,6 +390,22 @@ async function loadAnalysis(ticker){
           <div class="an-row"><span>Resistance</span><b>${(d.resistances||[]).map(money).join(' · ')||'—'}</b></div>
           <div class="an-row"><span>Support</span><b>${(d.supports||[]).map(money).join(' · ')||'—'}</b></div>
           <div class="an-row"><span>2y range</span><b>${money(d.range_low)} – ${money(d.range_high)}</b></div>
+        </div>
+        <div class="an-card"><h3>Performance</h3>
+          ${pctRow('Today', d.chg_1d)}${pctRow('1 week', d.chg_1w)}${pctRow('1 month', d.chg_1m)}
+        </div>
+        <div class="an-card"><h3>Typical daily move</h3>
+          <div class="an-row"><span class="an-big">${d.atr==null?'—':money(d.atr)}</span></div>
+          <div class="an-row muted" style="font-size:11px"><span>${d.typical_move_pct==null?'':'±'+d.typical_move_pct+'% per day — gauge for targets &amp; stops'}</span></div>
+        </div>
+        <div class="an-card"><h3>Activity</h3>
+          <div class="an-row"><span>Rel. volume</span><b class="${d.rel_volume>=2?'an-up':d.rel_volume!=null&&d.rel_volume<0.7?'an-down':''}">${d.rel_volume==null?'—':d.rel_volume+'x'}</b></div>
+          <div class="an-row muted" style="font-size:11px"><span>vs its 20-day average</span></div>
+        </div>
+        <div class="an-card"><h3>52-week</h3>
+          <div class="an-row"><span>High</span><b>${money(d.high_52w)}</b></div>
+          <div class="an-row"><span>Low</span><b>${money(d.low_52w)}</b></div>
+          <div class="an-row"><span>From high</span><b class="${d.pct_from_high<=-25?'an-down':'an-neutral'}">${d.pct_from_high==null?'—':d.pct_from_high+'%'}</b></div>
         </div>
       </div>
       <div class="an-alert"><b>↑ Breakout alert:</b> set at ${money(d.breakout_above)} — above this targets ${money(d.upside_target)}.</div>

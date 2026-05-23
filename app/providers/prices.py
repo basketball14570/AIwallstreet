@@ -74,10 +74,13 @@ class PriceHistoryProvider:
         Falls back to a synthetic walk (with approximate intraday range) offline."""
         if not settings.polygon_api_key:
             closes = _synthetic_closes(ticker, start, end)
+            rng = np.random.default_rng(abs(hash(ticker)) % (2**32) + 7)
+            vol = rng.lognormal(mean=13.0, sigma=0.45, size=len(closes))
             return pd.DataFrame({
                 "open": closes, "high": closes * 1.02,
                 "low": closes * 0.98, "close": closes,
-            })
+                "volume": vol,
+            }, index=closes.index)
         return await self._fetch_bars(ticker, start, end)
 
     @retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=2, max=16))
@@ -92,11 +95,12 @@ class PriceHistoryProvider:
             resp.raise_for_status()
             results = resp.json().get("results", [])
         if not results:
-            return pd.DataFrame(columns=["open", "high", "low", "close"])
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         idx = [pd.Timestamp(r["t"], unit="ms").normalize() for r in results]
         return pd.DataFrame(
             {"open": [r["o"] for r in results], "high": [r["h"] for r in results],
-             "low": [r["l"] for r in results], "close": [r["c"] for r in results]},
+             "low": [r["l"] for r in results], "close": [r["c"] for r in results],
+             "volume": [r.get("v", 0) for r in results]},
             index=idx,
         )
 
