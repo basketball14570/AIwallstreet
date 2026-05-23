@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     # Watchlist price alerts: poll your watchlist this often and ping when a name
     # crosses its breakout (resistance) or breakdown (support) level.
     watchlist_poll_sec: float = 300.0
+    # Trade-idea journal. public_base_url is the address your phone can reach the
+    # app at — it's used to build the clickable "Add to journal" link in alerts
+    # (set it to your LAN IP or a tunnel URL so the link works off-machine).
+    public_base_url: str = "http://localhost:8000"
+    journal_intraday_hours: float = 3.0   # snapshot price this many hours after save
+    journal_poll_sec: float = 600.0       # how often the backfiller runs
     env: str = "dev"
     log_level: str = "INFO"
 

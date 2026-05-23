@@ -7,6 +7,7 @@ Core tables:
   alert            -- dispatched alerts (audit trail + dedup)
   watchlist        -- user-curated tickers
   outcome          -- realised forward returns used for labelling / backtest
+  journal_entry    -- user-saved trade ideas + the forward prices we track for them
 """
 from __future__ import annotations
 
@@ -169,3 +170,30 @@ class Outcome(Base):
     max_drawdown: Mapped[float | None] = mapped_column(Float)
     label: Mapped[int | None] = mapped_column(Integer)  # 1 = explosive move
     evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class JournalEntry(Base):
+    """A trade idea the user saved from an alert. We snapshot the entry price and
+    then fill forward prices over the next few days to score how it played out."""
+
+    __tablename__ = "journal_entry"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    contract_type: Mapped[str] = mapped_column(String(4))  # call / put
+    strike: Mapped[float | None] = mapped_column(Float)
+    expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lean: Mapped[str] = mapped_column(String(8))  # bullish / bearish
+    entry_price: Mapped[float | None] = mapped_column(Float)  # underlying spot at save
+
+    # Forward prices we backfill (all underlying prices, not the option premium).
+    intraday_price: Mapped[float | None] = mapped_column(Float)   # +N hours, same day
+    next_open_price: Mapped[float | None] = mapped_column(Float)  # next session open
+    next_close_price: Mapped[float | None] = mapped_column(Float)  # next session close
+    day3_price: Mapped[float | None] = mapped_column(Float)        # ~3 sessions later
+
+    note: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(16), default="alert")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
