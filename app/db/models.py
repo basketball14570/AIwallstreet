@@ -8,6 +8,7 @@ Core tables:
   watchlist        -- user-curated tickers
   outcome          -- realised forward returns used for labelling / backtest
   journal_entry    -- user-saved trade ideas + the forward prices we track for them
+  analyst_levels   -- trusted weekly support/resistance levels, imported by paste
 """
 from __future__ import annotations
 
@@ -196,4 +197,20 @@ class JournalEntry(Base):
     source: Mapped[str] = mapped_column(String(16), default="alert")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class AnalystLevels(Base):
+    """Weekly support/resistance levels from a trusted analyst, imported by
+    pasting the analyst's table. One row per ticker (re-import overwrites)."""
+
+    __tablename__ = "analyst_levels"
+
+    ticker: Mapped[str] = mapped_column(String(16), primary_key=True)
+    clb36: Mapped[float | None] = mapped_column(Float)        # CLB36+B1:C column
+    weekly_cpl: Mapped[float | None] = mapped_column(Float)   # WEEKLY CPL column
+    resistances: Mapped[list] = mapped_column(JSONB, default=list)  # above price
+    supports: Mapped[list] = mapped_column(JSONB, default=list)     # below price
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

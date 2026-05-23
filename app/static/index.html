@@ -133,6 +133,7 @@
       <div class="tab" data-tab="contracts">By contract</div>
       <div class="tab" data-tab="analyze">Analyze stock</div>
       <div class="tab" data-tab="journal">Journal</div>
+      <div class="tab" data-tab="levels">Analyst levels</div>
     </div>
 
     <!-- LIVE -->
@@ -191,6 +192,21 @@
             <th class="num">Next close</th><th class="num">+3 days</th><th></th>
           </tr></thead>
           <tbody id="jRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ANALYST LEVELS -->
+    <div class="view" id="view-levels">
+      <div class="searchbar">
+        <div class="muted" style="margin-bottom:8px">Paste your analyst's weekly table below (one ticker per line). Each ticker is updated on import; they then appear on the Analyze tab and chart.</div>
+        <textarea id="lvInput" rows="6" placeholder="NVDA 215.24 220 240.4 235.2 225.2 / 210 204.8 194.8&#10;AAPL 308.8 305 331.7 321.5 315.2 / 298.7 288.6 282.2" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:8px;font:inherit;resize:vertical"></textarea>
+        <div style="margin-top:8px"><button id="lvImport" style="background:var(--blue);color:#04101f;border:none;border-radius:6px;padding:8px 16px;font:inherit;font-weight:700;cursor:pointer">Import levels</button> <span id="lvMsg" class="muted"></span></div>
+      </div>
+      <div class="feed">
+        <table>
+          <thead><tr><th>Ticker</th><th>Resistance (above)</th><th>Support (below)</th><th class="num">CLB36</th><th class="num">Wkly CPL</th><th></th></tr></thead>
+          <tbody id="lvRows"></tbody>
         </table>
       </div>
     </div>
@@ -360,6 +376,27 @@ function pctRow(label, v){
   const cls = v>0 ? 'an-up' : v<0 ? 'an-down' : 'an-neutral';
   return `<div class="an-row"><span>${label}</span><b class="${cls}">${v>0?'+':''}${v}%</b></div>`;
 }
+// Dependency-free daily line chart with horizontal level overlays.
+function chartSVG(hist, lines){
+  if (!hist || hist.length < 2) return '<div class="muted" style="padding:8px 0">No chart history.</div>';
+  const cs = hist.map(p => p.c);
+  let lo = Math.min(...cs), hi = Math.max(...cs);
+  (lines||[]).forEach(l => { if (l.y!=null){ lo=Math.min(lo,l.y); hi=Math.max(hi,l.y); } });
+  const pad = (hi-lo)*0.05 || 1; lo -= pad; hi += pad;
+  const W=100, H=40, n=cs.length;
+  const X = i => (i/(n-1)*W).toFixed(2), Y = v => (H-(v-lo)/(hi-lo)*H).toFixed(2);
+  const pts = cs.map((c,i) => `${X(i)},${Y(c)}`).join(' ');
+  const lvl = (lines||[]).filter(l => l.y!=null).map(l =>
+    `<line x1="0" y1="${Y(l.y)}" x2="100" y2="${Y(l.y)}" stroke="${l.color}" stroke-width="1" stroke-dasharray="2 2" vector-effect="non-scaling-stroke" opacity="0.85"/>`).join('');
+  return `<svg viewBox="0 0 100 40" preserveAspectRatio="none" style="width:100%;height:170px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;display:block">
+    ${lvl}<polyline fill="none" stroke="var(--blue)" stroke-width="1.4" vector-effect="non-scaling-stroke" points="${pts}"/></svg>`;
+}
+function chartLegend(lines, hist){
+  const span = hist && hist.length ? `<span style="float:right">${hist[0].t} → ${hist[hist.length-1].t}</span>` : '';
+  const items = (lines||[]).filter(l => l.y!=null)
+    .map(l => `<span style="margin-right:14px"><span style="color:${l.color}">▬</span> ${l.label} ${money(l.y)}</span>`).join('');
+  return `<div class="muted" style="font-size:11px;margin:6px 2px 14px">${items}${span}</div>`;
+}
 async function loadAnalysis(ticker){
   const box = document.getElementById('anResult');
   if (!ticker) { box.innerHTML = '<span class="muted">Type a ticker above and press Enter.</span>'; return; }
@@ -372,11 +409,36 @@ async function loadAnalysis(ticker){
     }
     const rsiCls = d.rsi==null ? '' : d.rsi>=70 ? 'an-down' : d.rsi<=30 ? 'an-up' : 'an-neutral';
     const macdCls = (d.macd_hist??0) > 0 ? 'an-up' : 'an-down';
+    const px = d.current!=null ? d.current : d.spot;
+    const prevTag = (d.current!=null && d.current!==d.spot)
+      ? ` <span class="muted" style="font-size:12px">· prev close ${money(d.spot)}</span>` : '';
+    // Level overlays for the chart (our levels + trusted analyst levels).
+    const lines = [
+      { y:d.breakout_above, color:'var(--red)',   label:'breakout' },
+      { y:d.breakdown_below,color:'var(--green)', label:'support' },
+    ];
+    let analystCard = '';
+    if (d.analyst) {
+      const a = d.analyst;
+      (a.resistances||[]).forEach(r => lines.push({ y:r, color:'var(--amber)', label:'analyst R' }));
+      (a.supports||[]).forEach(s => lines.push({ y:s, color:'var(--purple)', label:'analyst S' }));
+      const lst = (arr,cls) => (arr&&arr.length) ? arr.map(v=>`<span class="${cls}">${money(v)}</span>`).join(' · ') : '—';
+      analystCard = `
+        <div class="an-card" style="grid-column:1/-1;border-color:var(--amber)">
+          <h3>★ Analyst weekly levels</h3>
+          <div class="an-row"><span>Resistance (above)</span><b class="an-down">${lst(a.resistances)}</b></div>
+          <div class="an-row"><span>Support (below)</span><b class="an-up">${lst(a.supports)}</b></div>
+          <div class="an-row"><span>CLB36+B1 · Weekly CPL</span><b>${money(a.clb36)} · ${money(a.weekly_cpl)}</b></div>
+        </div>`;
+    }
     box.innerHTML = `
       <div class="an-row" style="margin-bottom:10px">
-        <span class="an-big">${d.ticker} <span class="muted" style="font-size:13px">${money(d.spot)}</span></span>
+        <span class="an-big">${d.ticker} <span class="muted" style="font-size:14px">${money(px)}</span>${prevTag}</span>
       </div>
+      ${chartSVG(d.history, lines)}
+      ${chartLegend(lines, d.history)}
       <div class="an-grid">
+        ${analystCard}
         <div class="an-card"><h3>Trend</h3><div style="font-size:13px">${d.trend}</div></div>
         <div class="an-card"><h3>Moving averages</h3>
           ${maRow('20-day', d.sma20, d.spot)}${maRow('50-day', d.sma50, d.spot)}${maRow('200-day', d.sma200, d.spot)}
@@ -463,6 +525,43 @@ async function loadJournal(){
   } catch (e) {}
 }
 
+// ---- Analyst levels ----
+async function loadLevels(){
+  try {
+    const rows = await (await fetch('/levels')).json();
+    const tb = document.getElementById('lvRows');
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="6" class="muted" style="padding:16px">No analyst levels imported yet. Paste the table above.</td></tr>'; return; }
+    tb.innerHTML = rows.map(a => `
+      <tr>
+        <td class="tk">${a.ticker}</td>
+        <td class="an-down">${(a.resistances||[]).map(money).join(' · ')||'—'}</td>
+        <td class="an-up">${(a.supports||[]).map(money).join(' · ')||'—'}</td>
+        <td class="num">${money(a.clb36)}</td>
+        <td class="num">${money(a.weekly_cpl)}</td>
+        <td class="num"><span style="cursor:pointer;color:var(--muted)" onclick="deleteLevels('${a.ticker}')">✕</span></td>
+      </tr>`).join('');
+  } catch (e) {}
+}
+async function deleteLevels(t){
+  await fetch('/levels/'+encodeURIComponent(t), { method:'DELETE' });
+  loadLevels();
+}
+async function importLevels(){
+  const text = document.getElementById('lvInput').value;
+  const msg = document.getElementById('lvMsg');
+  if (!text.trim()) { msg.textContent = 'Paste some rows first.'; return; }
+  msg.textContent = 'Importing…';
+  try {
+    const r = await fetch('/levels/import', { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text }) });
+    const d = await r.json();
+    msg.textContent = `Imported ${d.imported} ticker(s): ${(d.tickers||[]).join(', ')}`;
+    document.getElementById('lvInput').value = '';
+    loadLevels();
+  } catch (e) { msg.textContent = 'Import failed.'; }
+}
+document.getElementById('lvImport').addEventListener('click', importLevels);
+
 // ---- Tabs + polling ----
 let activeTab = 'live', poll = null;
 function setTab(name) {
@@ -473,6 +572,7 @@ function setTab(name) {
   if (name === 'buys')      { loadBuys();      poll = setInterval(loadBuys, 4000); }
   if (name === 'contracts') { loadContracts(); poll = setInterval(loadContracts, 5000); }
   if (name === 'journal')   { loadJournal();   poll = setInterval(loadJournal, 15000); }
+  if (name === 'levels')    { loadLevels(); }
   if (name === 'analyze')   { document.getElementById('anInput').focus(); }
 }
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));

@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import alerts, analysis, flow, journal, watchlist, ws
+from app.api.routes import alerts, analysis, flow, journal, levels, watchlist, ws
 from app.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.db.base import init_db
@@ -39,6 +39,7 @@ app.include_router(ws.router)
 app.include_router(alerts.router)
 app.include_router(analysis.router)
 app.include_router(journal.router)
+app.include_router(levels.router)
 
 _STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")

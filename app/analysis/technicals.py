@@ -100,6 +100,8 @@ class TechnicalRead:
     high_52w: float | None
     low_52w: float | None
     pct_from_high: float | None
+    current: float | None
+    history: list[dict]
     notes: list[str]
 
 
@@ -123,6 +125,16 @@ async def analyze(ticker: str) -> dict:
     source = "polygon" if settings.polygon_api_key else "synthetic"
     close = bars["close"]
     spot = round(float(close.iloc[-1]), 2)
+
+    # Live-ish price (snapshot) and recent closes for the chart.
+    try:
+        current = await _provider.current_price(ticker)
+    except Exception:  # noqa: BLE001 — chart/price are best-effort
+        current = None
+    recent = bars.tail(120)
+    history = [{"t": pd.Timestamp(idx).strftime("%Y-%m-%d"),
+                "c": round(float(row["close"]), 2)}
+               for idx, row in recent.iterrows()]
 
     sma20, sma50, sma200 = _sma(close, 20), _sma(close, 50), _sma(close, 200)
     rsi = _rsi(close)
@@ -218,6 +230,7 @@ async def analyze(ticker: str) -> dict:
         chg_1d=chg_1d, chg_1w=chg_1w, chg_1m=chg_1m,
         rel_volume=rel_volume, high_52w=high_52w, low_52w=low_52w,
         pct_from_high=pct_from_high,
+        current=current, history=history,
         notes=notes,
     )
     return asdict(read)
