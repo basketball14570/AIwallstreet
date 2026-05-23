@@ -590,7 +590,8 @@ function levelRow(l){
 }
 async function loadWatchlist(){
   const box = document.getElementById('wlCards');
-  box.innerHTML = '<span class="muted">Loading prices &amp; levels…</span>';
+  if (!box.querySelector('.an-grid'))   // only show placeholder on first load, not refreshes
+    box.innerHTML = '<span class="muted">Loading prices &amp; levels…</span>';
   try {
     const rows = await (await fetch('/watchlist/overview')).json();
     if (!rows.length) { box.innerHTML = '<span class="muted">No tickers yet. Add one above to start monitoring its levels.</span>'; return; }
@@ -644,7 +645,7 @@ function setTab(name) {
   if (name === 'contracts') { loadContracts(); poll = setInterval(loadContracts, 5000); }
   if (name === 'journal')   { loadJournal();   poll = setInterval(loadJournal, 15000); }
   if (name === 'levels')    { loadLevels(); }
-  if (name === 'watchlist') { loadWatchlist(); }
+  if (name === 'watchlist') { loadWatchlist(); poll = setInterval(loadWatchlist, 30000); }
   if (name === 'analyze')   { document.getElementById('anInput').focus(); }
 }
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));
