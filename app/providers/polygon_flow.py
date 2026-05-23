@@ -152,9 +152,12 @@ class PolygonFlowProvider(FlowProvider):
             source="polygon", external_id=f"{opt_ticker}:{volume}",
             ticker=underlying, contract_type=ContractType(details["contract_type"]),
             strike=float(details["strike_price"]), expiry=expiry, side=side,
-            # Polygon snapshots don't flag sweeps; approximate an aggressive
-            # buy as a large ask-side burst.
-            is_sweep=bool(side == Side.ASK and delta >= 250),
+            # Polygon snapshots don't flag sweeps. With a known side, treat a
+            # large ask-side burst as a sweep; when side is unavailable (no
+            # quotes/trades on the plan), a big single-poll volume burst stands
+            # in as the urgency proxy.
+            is_sweep=bool(delta >= 250 if side == Side.ASK
+                          else (side is None and delta >= 500)),
             is_spread=False, premium=premium, size=delta, spot=spot,
             iv=float(iv) if iv is not None else None,
             open_interest=int(oi) if oi else None,

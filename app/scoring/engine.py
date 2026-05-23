@@ -85,7 +85,17 @@ class ScoringEngine:
 
     # ----- conviction -------------------------------------------------------
     def _conviction(self, f: FlowFeatureVector, c: Components) -> float:
-        s = 0.45 * f.ask_side_ratio + 0.35 * f.sweep_urgency
+        if f.aggressor_known:
+            aggression = f.ask_side_ratio
+        else:
+            # No bought/sold (aggressor) data on this plan: a fresh position
+            # swamping open interest is the directional-conviction proxy.
+            aggression = ramp(f.vol_oi, 1.0, 5.0)
+            if f.vol_oi >= 2.0 and f.premium > 100_000:
+                c.reasons.append("Heavy fresh volume vs open interest — aggressive new "
+                                 "positioning (direction inferred from volume; aggressor "
+                                 "side not in data plan)")
+        s = 0.45 * aggression + 0.35 * f.sweep_urgency
         s += 0.20 * ramp(f.repeated_sweeps, 1, 5)
         # Sequence corroboration (0 by default -> no effect on snapshot scoring).
         s += 0.12 * clamp(f.seq_cadence_accel) + 0.08 * clamp(f.seq_strike_ladder)
@@ -118,6 +128,10 @@ class ScoringEngine:
         # Per-contract volume swamping open interest = freshly opened position.
         opening = ramp(f.vol_oi, 1.0, 5.0)
         s = 0.38 * opt + 0.25 * rvol + 0.20 * oi + 0.17 * opening
+        # When broader volume context is unavailable (e.g. an options-only data
+        # plan with no market-wide relative-volume feed), the per-contract vol/OI
+        # carries the confirmation on its own.
+        s = max(s, 0.85 * opening)
         if f.rel_options_volume >= 5:
             c.reasons.append(f"Options volume {f.rel_options_volume:.1f}x normal")
         if f.stock_rvol >= 2:
@@ -195,8 +209,10 @@ class ScoringEngine:
         s = 0.0
         if f.at_midpoint:
             s += 0.35
-        if f.ask_side_ratio == 0.0 and not f.at_midpoint:
-            s += 0.25  # bid-side / sold
+        # Genuine bid-side (sold) print — only when the side is actually known.
+        # Unknown side (no quotes/trades on the plan) must not be penalised here.
+        if f.aggressor_known and f.ask_side_ratio == 0.0 and not f.at_midpoint:
+            s += 0.25
         s += 0.25 * (1 - ramp(f.rel_options_volume, 1, 5))  # no volume backing
         s += 0.15 * (1 - f.sweep_urgency)
         s += 0.15 * ramp(f.iv_rank, 0.85, 1.0)  # chasing very rich IV
@@ -210,7 +226,8 @@ class ScoringEngine:
         spreads (collars/risk-reversals), protective puts on mega-caps, passive
         midpoint/bid fills with no catalyst."""
         s = 0.0
-        passive = f.ask_side_ratio <= 0.5  # mid or bid
+        # "Passive" = mid/bid fill, but only meaningful when the side is known.
+        passive = f.aggressor_known and f.ask_side_ratio <= 0.5
         if f.is_spread:
             # Multi-leg: only neutral/protective shapes look like hedges now.
             # A bullish vertical / risk-reversal is a directional bet, so it is

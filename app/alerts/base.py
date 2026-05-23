@@ -31,6 +31,34 @@ class AlertDispatcher:
 
     def should_alert(self, result: ScoreResult, event: FlowEvent | None = None,
                      features: FlowFeatureVector | None = None) -> bool:
+        # Two independent paths: the conviction-confidence gate (needs rich data
+        # incl. aggressor side), OR the raw unusual-activity gate (works on an
+        # options-only plan). Either one firing is enough.
+        if self._confidence_gate(result, event, features):
+            return True
+        if features is not None and self._unusual_activity_gate(event, features):
+            return True
+        return False
+
+    def is_unusual_activity_only(self, result: ScoreResult, event: FlowEvent | None,
+                                 features: FlowFeatureVector | None) -> bool:
+        """True when the alert qualifies only via the unusual-activity gate (the
+        conviction gate did not pass) — used to label the message accordingly."""
+        return (not self._confidence_gate(result, event, features)
+                and features is not None
+                and self._unusual_activity_gate(event, features))
+
+    def _unusual_activity_gate(self, event: FlowEvent | None,
+                               features: FlowFeatureVector) -> bool:
+        if not settings.alert_on_unusual_activity:
+            return False
+        return (features.is_opening
+                and features.vol_oi >= settings.alert_unusual_vol_oi
+                and features.premium >= settings.alert_unusual_premium
+                and features.dte <= settings.alert_unusual_dte_max)
+
+    def _confidence_gate(self, result: ScoreResult, event: FlowEvent | None = None,
+                         features: FlowFeatureVector | None = None) -> bool:
         if result.confidence < settings.alert_min_confidence:
             return False
         if self._allowed and result.classification.value not in self._allowed:
@@ -55,8 +83,13 @@ class AlertDispatcher:
             return False
         return True
 
-    async def dispatch(self, event: FlowEvent, result: ScoreResult) -> dict[str, str]:
+    async def dispatch(self, event: FlowEvent, result: ScoreResult,
+                       features: FlowFeatureVector | None = None) -> dict[str, str]:
         summary = generate_summary(event, result)
+        if self.is_unusual_activity_only(result, event, features):
+            summary = (f"UNUSUAL OPTIONS ACTIVITY — {event.ticker}\n"
+                       "(flagged on volume/premium; conviction limited — no "
+                       "buy/sell direction on this data plan)\n" + summary)
         try:
             block = await levels_block(event)
         except Exception as exc:  # noqa: BLE001 — levels are best-effort

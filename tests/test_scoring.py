@@ -64,6 +64,31 @@ def test_midpoint_low_volume_flagged_as_fake():
     assert result.confidence < 70
 
 
+def test_unknown_side_unusual_flow_not_fake_and_alerts():
+    """An options-only data plan has no aggressor side (event.side is None).
+    Such flow must NOT be auto-flagged as fake/hedging, and a strongly unusual
+    print (high vol/OI, big premium, opening, near-dated) should still alert via
+    the unusual-activity gate."""
+    from app.alerts.base import AlertDispatcher
+
+    ev = _event(side=None, is_sweep=False, premium=900_000, size=3000,
+                open_interest=300, vol_oi=4.0)
+    feats, result = classify(ev, MarketContext(ticker="GME"))
+    assert feats.aggressor_known is False
+    assert result.fake_flow_prob < 0.6          # unknown side != sold
+    d = AlertDispatcher()
+    assert d.should_alert(result, ev, feats)    # unusual-activity gate fires
+    assert d.is_unusual_activity_only(result, ev, feats)
+
+
+def test_known_bid_side_still_penalised():
+    """A genuine sold (bid-side) print is still treated as low conviction."""
+    _, result = classify(_event(side=Side.BID, is_sweep=False, premium=60_000),
+                         MarketContext(ticker="GME", rel_options_volume=1.0))
+    assert result.classification in {Classification.NORMAL, Classification.FAKE,
+                                     Classification.HEDGING}
+
+
 def test_probabilities_in_range():
     _, result = classify(_event(), MarketContext(ticker="GME"))
     for p in (result.explosion_prob, result.squeeze_prob,

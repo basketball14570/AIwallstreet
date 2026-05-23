@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     # For multi-leg flow, only alert when the structure is bullish (call
     # vertical / risk reversal); skip neutral/hedge structures.
     alert_bullish_structures_only: bool = False
+    # "Unusual Options Activity" alert — fires on the raw screener signals
+    # (vol/OI, premium, opening, near-dated) independent of the conviction
+    # confidence score. This is the path that works on data plans WITHOUT
+    # option quotes/trades, where bought-vs-sold conviction can't be computed.
+    alert_on_unusual_activity: bool = True
+    alert_unusual_vol_oi: float = 3.0          # day volume >= 3x open interest
+    alert_unusual_premium: float = 250_000.0   # min total premium ($)
+    alert_unusual_dte_max: float = 60.0        # near-dated only (calendar days)
     env: str = "dev"
     log_level: str = "INFO"
 

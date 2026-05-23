@@ -104,6 +104,7 @@ class MarketContext(BaseModel):
 
 class FlowFeatureVector(BaseModel):
     ask_side_ratio: float = 0.0
+    aggressor_known: bool = True   # False when quotes/trades (side) aren't in data
     sweep_urgency: float = 0.0
     repeated_sweeps: int = 0
     at_midpoint: bool = False

@@ -34,12 +34,16 @@ def _otm_pct(event: FlowEvent) -> float:
 
 
 def _sweep_urgency(event: FlowEvent) -> float:
-    """0-1 urgency proxy: sweeps lifting the ask with large premium are urgent."""
+    """0-1 urgency proxy: sweeps lifting the ask with large premium are urgent.
+    When the aggressor side is unavailable (no quotes/trades on the data plan),
+    a large fresh-volume burst stands in for the ask-side term."""
     score = 0.0
     if event.is_sweep:
         score += 0.5
     if event.side == Side.ASK:
         score += 0.3
+    elif event.side is None and event.vol_oi:
+        score += 0.3 * min(event.vol_oi / 5.0, 1.0)
     # premium bucket: $250k+ adds urgency
     score += min(event.premium / 1_000_000.0, 1.0) * 0.2
     return min(score, 1.0)
@@ -69,7 +73,16 @@ def build_features(
 ) -> FlowFeatureVector:
     ctx = ctx or MarketContext(ticker=event.ticker)
     seq = seq or SequenceFeatures()
-    ask_side_ratio = 1.0 if event.side == Side.ASK else (0.5 if event.side == Side.MID else 0.0)
+    # ask_side_ratio: 1=lifted ask (buy), 0=hit bid (sell), 0.5=mid OR unknown.
+    # "Unknown" (no quotes/trades on the plan) maps to neutral 0.5 — never to 0,
+    # so the absence of side data isn't mistaken for a bearish/sold print.
+    if event.side == Side.ASK:
+        ask_side_ratio = 1.0
+    elif event.side == Side.BID:
+        ask_side_ratio = 0.0
+    else:  # MID or unknown
+        ask_side_ratio = 0.5
+    aggressor_known = event.side is not None
     vol_oi = _vol_oi(event)
     # iv_rank precedence: explicit tracker value > context value > unknown (0.5).
     iv_rank_val = iv_rank if iv_rank is not None else ctx.iv_rank
@@ -89,6 +102,7 @@ def build_features(
         seq_premium_velocity=seq.premium_velocity,
         seq_count=seq.count,
         ask_side_ratio=ask_side_ratio,
+        aggressor_known=aggressor_known,
         sweep_urgency=_sweep_urgency(event),
         repeated_sweeps=repeated_sweeps,
         at_midpoint=event.side == Side.MID,
