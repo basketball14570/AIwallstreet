@@ -46,6 +46,29 @@ class PriceHistoryProvider:
         idx = [pd.Timestamp(r["t"], unit="ms").normalize() for r in results]
         return pd.Series([r["c"] for r in results], index=idx, name=ticker)
 
+    async def current_price(self, ticker: str) -> float | None:
+        """Latest price from the stock snapshot (15-min delayed on most plans).
+        Falls back to the last synthetic close offline."""
+        if not settings.polygon_api_key:
+            end = datetime.now(tz=None)
+            s = _synthetic_closes(ticker, end - timedelta(days=10), end)
+            return round(float(s.iloc[-1]), 2) if len(s) else None
+        try:
+            await self._bucket.acquire()
+            url = (f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/"
+                   f"tickers/{ticker}")
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(url, params={"apiKey": settings.polygon_api_key})
+                resp.raise_for_status()
+                t = resp.json().get("ticker", {})
+            price = ((t.get("lastTrade") or {}).get("p")
+                     or (t.get("day") or {}).get("c")
+                     or (t.get("prevDay") or {}).get("c"))
+            return round(float(price), 2) if price else None
+        except Exception as exc:  # noqa: BLE001
+            log.warning("current_price failed", ticker=ticker, error=str(exc))
+            return None
+
     async def daily_bars(self, ticker: str, start: datetime, end: datetime) -> pd.DataFrame:
         """Daily OHLC bars indexed by date (tz-naive). Columns: open/high/low/close.
         Falls back to a synthetic walk (with approximate intraday range) offline."""

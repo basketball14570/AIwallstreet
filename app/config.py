@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     # cooldown stops one busy contract from alerting over and over.
     alert_startup_grace_sec: float = 120.0
     alert_cooldown_min: float = 360.0          # don't re-alert a contract for 6h
+    # Watchlist price alerts: poll your watchlist this often and ping when a name
+    # crosses its breakout (resistance) or breakdown (support) level.
+    watchlist_poll_sec: float = 300.0
     env: str = "dev"
     log_level: str = "INFO"
 

@@ -15,6 +15,7 @@ import socket
 
 from app.core.logging import configure_logging, get_logger
 from app.db.base import init_db
+from app.jobs.watch_monitor import WatchlistMonitor
 from app.pipeline.consumer import ScoringConsumer
 from app.pipeline.ingest import run_ingest
 
@@ -32,6 +33,8 @@ async def main() -> None:
         tasks.append(asyncio.create_task(run_ingest()))
     if mode in ("all", "consumer"):
         tasks.append(asyncio.create_task(ScoringConsumer(name).run()))
+    if mode in ("all", "watchlist"):
+        tasks.append(asyncio.create_task(WatchlistMonitor().run()))
     log.info("worker started", mode=mode, name=name)
     await asyncio.gather(*tasks)
 
