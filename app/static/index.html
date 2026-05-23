@@ -132,6 +132,7 @@
       <div class="tab" data-tab="buys">Top buys</div>
       <div class="tab" data-tab="contracts">By contract</div>
       <div class="tab" data-tab="analyze">Analyze stock</div>
+      <div class="tab" data-tab="journal">Journal</div>
     </div>
 
     <!-- LIVE -->
@@ -175,6 +176,21 @@
             <th class="num">Premium</th><th class="num">Sweeps</th><th class="num">Prints</th>
           </tr></thead>
           <tbody id="ctRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- JOURNAL -->
+    <div class="view" id="view-journal">
+      <div class="searchbar muted" id="jStats">Saved trade ideas — tracking whether each one's lean played out.</div>
+      <div class="feed">
+        <table>
+          <thead><tr>
+            <th>Saved</th><th>Contract</th><th>Lean</th><th class="num">Entry</th>
+            <th class="num">+3h</th><th class="num">Next open</th>
+            <th class="num">Next close</th><th class="num">+3 days</th><th></th>
+          </tr></thead>
+          <tbody id="jRows"></tbody>
         </table>
       </div>
     </div>
@@ -385,6 +401,47 @@ document.getElementById('anInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') loadAnalysis(e.target.value.trim().toUpperCase());
 });
 
+// ---- Journal ----
+function moveCell(m){
+  if (!m) return '<td class="num muted">—</td>';
+  const cls = m.favorable ? 'an-up' : 'an-down';
+  const sign = m.pct_change > 0 ? '+' : '';
+  return `<td class="num ${cls}">${money(m.price)}<br><span style="font-size:11px">${sign}${m.pct_change}%</span></td>`;
+}
+async function deleteJournal(id){
+  if (!confirm('Remove this idea from the journal?')) return;
+  await fetch('/journal/'+id, { method:'DELETE' });
+  loadJournal();
+}
+async function loadJournal(){
+  try {
+    const [rows, st] = await Promise.all([
+      (await fetch('/journal?limit=100')).json(),
+      (await fetch('/journal/stats')).json(),
+    ]);
+    const h = st.horizons || {};
+    const fmtHr = x => x.hit_rate==null ? '—' : Math.round(x.hit_rate*100)+'% ('+x.favorable+'/'+x.resolved+')';
+    document.getElementById('jStats').innerHTML =
+      `<b>${st.total_ideas||0}</b> ideas saved · hit-rate by next close: <b>${fmtHr(h.next_close||{})}</b>`
+      + ` · by +3 days: <b>${fmtHr(h.day3||{})}</b>`
+      + ` <span class="muted">— tracks the underlying price vs. the idea's lean. Not financial advice.</span>`;
+    const tb = document.getElementById('jRows');
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="9" class="muted" style="padding:18px">No saved ideas yet. Tap "Add to journal" on an alert to start tracking one.</td></tr>'; return; }
+    tb.innerHTML = rows.map(d => {
+      const leanCls = d.lean==='bullish' ? 'an-up' : 'an-down';
+      const saved = d.created_at ? new Date(d.created_at).toLocaleDateString(undefined,{month:'short',day:'numeric'}) : '—';
+      return `<tr>
+        <td>${saved}</td>
+        <td class="tk">${contractLabel(d)}</td>
+        <td class="${leanCls}" style="font-weight:700">${d.lean}</td>
+        <td class="num">${money(d.entry_price)}</td>
+        ${moveCell(d.intraday)}${moveCell(d.next_open)}${moveCell(d.next_close)}${moveCell(d.day3)}
+        <td class="num"><span style="cursor:pointer;color:var(--muted)" onclick="deleteJournal(${d.id})">✕</span></td>
+      </tr>`;
+    }).join('');
+  } catch (e) {}
+}
+
 // ---- Tabs + polling ----
 let activeTab = 'live', poll = null;
 function setTab(name) {
@@ -394,6 +451,7 @@ function setTab(name) {
   if (poll) { clearInterval(poll); poll = null; }
   if (name === 'buys')      { loadBuys();      poll = setInterval(loadBuys, 4000); }
   if (name === 'contracts') { loadContracts(); poll = setInterval(loadContracts, 5000); }
+  if (name === 'journal')   { loadJournal();   poll = setInterval(loadJournal, 15000); }
   if (name === 'analyze')   { document.getElementById('anInput').focus(); }
 }
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));

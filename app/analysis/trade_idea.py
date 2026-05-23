@@ -14,7 +14,12 @@ from __future__ import annotations
 from app.analysis.glossary import explain_terms
 from app.analysis.technicals import analyze
 from app.core.logging import get_logger
-from app.schemas.flow import ContractType, FlowEvent, ScoreResult
+from app.schemas.flow import (
+    ContractType,
+    FlowEvent,
+    FlowFeatureVector,
+    ScoreResult,
+)
 
 log = get_logger("analysis.trade_idea")
 
@@ -23,7 +28,23 @@ def _money(v: float | None) -> str:
     return "—" if v is None else f"${v:,.2f}"
 
 
-async def build_trade_idea(event: FlowEvent, result: ScoreResult) -> str:
+def _earnings_line(features: FlowFeatureVector | None) -> str | None:
+    """Warn when earnings land soon — but only with a REAL date (999.0 is the
+    'unknown' sentinel, so we stay silent rather than fabricate one)."""
+    if features is None:
+        return None
+    dte = features.days_to_earnings
+    if dte is None or dte >= 999 or dte < 0 or dte > 14:
+        return None
+    when = "today" if dte < 1 else ("tomorrow" if dte < 2 else f"in {dte:.0f} days")
+    return (f"\n⚠️ EARNINGS {when.upper()}:\n{when.capitalize()} this company "
+            "reports earnings. Unusual flow right before earnings is often just "
+            "event positioning — a binary bet on the report — and options get "
+            "expensive and extra-risky into the print. Tread carefully.")
+
+
+async def build_trade_idea(event: FlowEvent, result: ScoreResult,
+                           features: FlowFeatureVector | None = None) -> str:
     """Render the full plain-English card as text (for Telegram/Discord/preview)."""
     is_call = event.contract_type == ContractType.CALL
     kind = "CALL" if is_call else "PUT"
@@ -55,6 +76,10 @@ async def build_trade_idea(event: FlowEvent, result: ScoreResult) -> str:
         "Important: your data plan can't see whether this was a BUY or a SELL, so "
         "treat the direction as a hint to investigate — not a confirmed signal."
     )
+
+    earn = _earnings_line(features)
+    if earn:
+        lines.append(earn)
 
     # 4) Chart read + a where-it-could-go / where-it-breaks plan
     try:

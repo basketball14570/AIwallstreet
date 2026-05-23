@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     reddit_client_id: str = ""
     reddit_client_secret: str = ""
     news_api_key: str = ""
+    # Optional free earnings-calendar source. When set, alert cards show a
+    # "reports in N days" warning; left blank, no earnings line is shown (we
+    # never fabricate one — Polygon's plan doesn't include earnings dates).
+    finnhub_api_key: str = ""
 
     # Datastores
     database_url: str = "postgresql+asyncpg://flow:flow@localhost:5432/flow"

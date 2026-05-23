@@ -26,14 +26,19 @@ class DiscordAlerter:
             resp.raise_for_status()
         return "sent"
 
-    async def send_text(self, text: str) -> str:
-        """Send arbitrary text (used by the daily digest)."""
+    async def send_text(self, text: str,
+                        links: list[tuple[str, str]] | None = None) -> str:
+        """Send arbitrary text (used by the daily digest). Optional (label, url)
+        links render as clickable URLs below the code block."""
         if not settings.discord_webhook_url:
             return "skipped"
+        content = f"```\n{text}\n```"
+        if links:
+            content += "\n" + "\n".join(f"{lbl}: {url}" for lbl, url in links)
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 settings.discord_webhook_url,
-                json={"content": f"```\n{text}\n```"},
+                json={"content": content},
             )
             resp.raise_for_status()
         return "sent"

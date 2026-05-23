@@ -31,19 +31,21 @@ class TelegramAlerter:
             resp.raise_for_status()
         return "sent"
 
-    async def send_text(self, text: str) -> str:
-        """Send arbitrary text (used by the daily digest)."""
+    async def send_text(self, text: str,
+                        links: list[tuple[str, str]] | None = None) -> str:
+        """Send arbitrary text (used by the daily digest). Optional (label, url)
+        links render as tappable links below the code block."""
         if not (settings.telegram_bot_token and settings.telegram_chat_id):
             return "skipped"
+        body = f"```\n{text}\n```"
+        if links:
+            body += "\n" + "\n".join(f"[{lbl}]({url})" for lbl, url in links)
         url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 url,
-                json={
-                    "chat_id": settings.telegram_chat_id,
-                    "text": f"```\n{text}\n```",
-                    "parse_mode": "Markdown",
-                },
+                json={"chat_id": settings.telegram_chat_id, "text": body,
+                      "parse_mode": "Markdown"},
             )
             resp.raise_for_status()
         return "sent"

@@ -16,6 +16,7 @@ from app.core.logging import get_logger
 from app.core.ratelimit import TokenBucket
 from app.core.redis_client import get_redis
 from app.providers.base import ContextProvider
+from app.providers.earnings import EarningsProvider
 from app.providers.sentiment import SentimentProvider
 from app.schemas.flow import MarketContext
 from app.scoring.priors import get_priors
@@ -28,6 +29,7 @@ class PolygonContextProvider(ContextProvider):
     def __init__(self, sentiment: SentimentProvider | None = None,
                  rate_per_min: float = 300):
         self.sentiment = sentiment or SentimentProvider()
+        self.earnings = EarningsProvider()
         self._bucket = TokenBucket(rate=rate_per_min / 60.0, capacity=rate_per_min / 6.0)
 
     async def get_context(self, ticker: str) -> MarketContext:
@@ -44,6 +46,12 @@ class PolygonContextProvider(ContextProvider):
         sent = await self.sentiment.score(ticker)
         ctx.social_score = sent["social"]
         ctx.news_score = sent["news"]
+        # Real earnings date (optional Finnhub). Mock mode already carries a
+        # synthetic value, so only override on the live path.
+        if settings.polygon_api_key:
+            dte_earn = await self.earnings.days_to_earnings(ticker)
+            if dte_earn is not None:
+                ctx.days_to_earnings = dte_earn
         # Per-ticker historical hit-rate prior (artifact written by nightly
         # retrain; None until enough labelled outcomes exist).
         priors = get_priors()

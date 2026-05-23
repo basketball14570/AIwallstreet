@@ -114,7 +114,7 @@ class AlertDispatcher:
         # The beginner trade-idea card is the message: it already weaves in the
         # plain-English what/why, the chart read, levels, risk, and a glossary.
         try:
-            summary = await build_trade_idea(event, result)
+            summary = await build_trade_idea(event, result, features)
         except Exception as exc:  # noqa: BLE001 — never let formatting drop an alert
             log.warning("trade-idea build failed; using basic summary",
                         ticker=event.ticker, error=str(exc))

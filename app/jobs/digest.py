@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import desc, select
 
 from app.alerts.discord import DiscordAlerter
+from app.alerts.links import journal_url
 from app.alerts.telegram import TelegramAlerter
 from app.config import settings
 from app.core.logging import get_logger
@@ -20,9 +21,11 @@ from app.db.models import FlowFeatures, RawFlow
 log = get_logger("digest")
 
 
-async def build_digest(limit: int = 5, lookback_hours: int = 24) -> str | None:
+async def build_digest(
+    limit: int = 5, lookback_hours: int = 24
+) -> tuple[str, list[tuple[str, str]]] | None:
     """Top-N unusual opening setups in the window, deduped per contract. Returns
-    a formatted message, or None if nothing qualified."""
+    (message, save-links) or None if nothing qualified."""
     since = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     stmt = (
         select(RawFlow, FlowFeatures)
@@ -54,27 +57,34 @@ async def build_digest(limit: int = 5, lookback_hours: int = 24) -> str | None:
     today = datetime.now(timezone.utc)
     lines = [f"DAILY TOP SETUPS — {today:%b %d, %Y}",
              f"The {len(picks)} most unusual opening trades today:\n"]
+    links: list[tuple[str, str]] = []
     for i, (raw, feats) in enumerate(picks, 1):
         lean = "bullish lean" if raw.contract_type == "call" else "bearish/hedge lean"
         lines.append(
             f"{i}. {raw.ticker}  ${raw.strike:g} {raw.contract_type} exp {raw.expiry:%b %d}\n"
             f"   ${raw.premium:,.0f} premium · {feats.vol_oi:.1f}x open interest · {lean}"
         )
-    lines.append("\nOpen the dashboard's 'Analyze stock' tab for levels on any of "
-                 "these. Educational information, not financial advice.")
-    return "\n".join(lines)
+        links.append((
+            f"➕ Save #{i} {raw.ticker}",
+            journal_url(raw.ticker, raw.contract_type, raw.strike,
+                        f"{raw.expiry:%Y-%m-%d}", entry_price=raw.spot, source="digest"),
+        ))
+    lines.append("\nTap a link below to track any of these in your journal. "
+                 "Educational information, not financial advice.")
+    return "\n".join(lines), links
 
 
 async def send_digest() -> dict:
     """Build and broadcast the digest to configured channels."""
-    msg = await build_digest()
-    if msg is None:
+    built = await build_digest()
+    if built is None:
         log.info("digest empty — no qualifying setups")
         return {"sent": False, "reason": "no setups"}
+    msg, links = built
     status = {}
     for ch in (TelegramAlerter(), DiscordAlerter()):
         try:
-            status[ch.name] = await ch.send_text(msg)
+            status[ch.name] = await ch.send_text(msg, links)
         except Exception as exc:  # noqa: BLE001
             status[ch.name] = "error"
             log.error("digest channel failed", channel=ch.name, error=str(exc))
