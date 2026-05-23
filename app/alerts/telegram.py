@@ -14,8 +14,11 @@ class TelegramAlerter:
     name = "telegram"
 
     async def send(self, summary: str, event: FlowEvent, result: ScoreResult) -> str:
+        return await self.send_text(summary)
+
+    async def send_text(self, text: str) -> str:
+        """Send arbitrary text (used by the daily digest)."""
         if not (settings.telegram_bot_token and settings.telegram_chat_id):
-            log.info("telegram disabled", ticker=event.ticker)
             return "skipped"
         url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
         async with httpx.AsyncClient(timeout=10) as client:
@@ -23,7 +26,7 @@ class TelegramAlerter:
                 url,
                 json={
                     "chat_id": settings.telegram_chat_id,
-                    "text": f"```\n{summary}\n```",
+                    "text": f"```\n{text}\n```",
                     "parse_mode": "Markdown",
                 },
             )

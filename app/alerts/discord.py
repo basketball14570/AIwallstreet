@@ -14,13 +14,16 @@ class DiscordAlerter:
     name = "discord"
 
     async def send(self, summary: str, event: FlowEvent, result: ScoreResult) -> str:
+        return await self.send_text(summary)
+
+    async def send_text(self, text: str) -> str:
+        """Send arbitrary text (used by the daily digest)."""
         if not settings.discord_webhook_url:
-            log.info("discord disabled", ticker=event.ticker)
             return "skipped"
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 settings.discord_webhook_url,
-                json={"content": f"```\n{summary}\n```"},
+                json={"content": f"```\n{text}\n```"},
             )
             resp.raise_for_status()
         return "sent"

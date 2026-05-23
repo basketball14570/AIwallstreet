@@ -14,6 +14,7 @@ import asyncio
 from app.core.logging import configure_logging, get_logger
 from app.db.base import init_db
 from app.jobs.backfill import backfill
+from app.jobs.digest import send_digest
 from app.jobs.retrain import retrain
 
 log = get_logger("nightly")
@@ -22,7 +23,12 @@ log = get_logger("nightly")
 async def run_once() -> dict:
     bf = await backfill()
     rt = await retrain()
-    result = {"backfill": bf, "retrain": rt}
+    try:
+        dg = await send_digest()
+    except Exception as exc:  # noqa: BLE001 — digest must never break maintenance
+        log.error("digest failed", error=str(exc))
+        dg = {"sent": False, "error": str(exc)}
+    result = {"backfill": bf, "retrain": rt, "digest": dg}
     log.info("nightly done", **{k: str(v) for k, v in result.items()})
     return result
 
