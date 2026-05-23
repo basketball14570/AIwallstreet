@@ -7,7 +7,7 @@ import time
 from app.alerts.discord import DiscordAlerter
 from app.alerts.summary import generate_summary
 from app.alerts.telegram import TelegramAlerter
-from app.analysis.levels import levels_block
+from app.analysis.trade_idea import build_trade_idea
 from app.config import settings
 from app.core.logging import get_logger
 from app.schemas.flow import ContractType, FlowEvent, FlowFeatureVector, ScoreResult
@@ -111,18 +111,14 @@ class AlertDispatcher:
 
     async def dispatch(self, event: FlowEvent, result: ScoreResult,
                        features: FlowFeatureVector | None = None) -> dict[str, str]:
-        summary = generate_summary(event, result)
-        if self.is_unusual_activity_only(result, event, features):
-            summary = (f"UNUSUAL OPTIONS ACTIVITY — {event.ticker}\n"
-                       "(flagged on volume/premium; conviction limited — no "
-                       "buy/sell direction on this data plan)\n" + summary)
+        # The beginner trade-idea card is the message: it already weaves in the
+        # plain-English what/why, the chart read, levels, risk, and a glossary.
         try:
-            block = await levels_block(event)
-        except Exception as exc:  # noqa: BLE001 — levels are best-effort
-            log.warning("levels lookup failed", ticker=event.ticker, error=str(exc))
-            block = ""
-        if block:
-            summary = f"{summary}\n\n{block}"
+            summary = await build_trade_idea(event, result)
+        except Exception as exc:  # noqa: BLE001 — never let formatting drop an alert
+            log.warning("trade-idea build failed; using basic summary",
+                        ticker=event.ticker, error=str(exc))
+            summary = generate_summary(event, result)
         results = await asyncio.gather(
             *(ch.send(summary, event, result) for ch in self.channels),
             return_exceptions=True,

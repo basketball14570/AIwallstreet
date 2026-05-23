@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Query
 
 from app.alerts.base import AlertDispatcher
-from app.alerts.summary import generate_summary
-from app.analysis.levels import levels_block
+from app.analysis.glossary import GLOSSARY
+from app.analysis.trade_idea import build_trade_idea
 from app.core.logging import get_logger
 from app.providers.prices import PriceHistoryProvider
 from app.schemas.flow import (
@@ -65,13 +65,13 @@ async def test_alert(ticker: str = Query("NVDA", description="ticker to preview"
     spot = await _recent_spot(ticker)
     event, result = _sample(ticker, spot)
     status = await AlertDispatcher().dispatch(event, result)
-    preview = generate_summary(event, result)
-    try:
-        block = await levels_block(event)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("levels preview failed", ticker=ticker, error=str(exc))
-        block = ""
-    if block:
-        preview = f"{preview}\n\n{block}"
+    preview = await build_trade_idea(event, result)
     return {"ticker": ticker.upper(), "spot": spot, "channels": status,
-            "levels_available": bool(block), "preview": preview}
+            "levels_available": "Price history wasn't available" not in preview,
+            "preview": preview}
+
+
+@router.get("/glossary", tags=["alerts"])
+async def glossary():
+    """Plain-English definitions of every term used in alerts."""
+    return GLOSSARY
