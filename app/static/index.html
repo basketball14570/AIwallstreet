@@ -138,6 +138,7 @@
       <div class="tab" data-tab="journal">Journal</div>
       <div class="tab" data-tab="levels">Analyst levels</div>
       <div class="tab" data-tab="watchlist">Watchlist</div>
+      <div class="tab" data-tab="positions">My options</div>
     </div>
 
     <!-- LIVE -->
@@ -227,6 +228,24 @@
         <div id="wlMsg" class="muted" style="margin-top:6px"></div>
       </div>
       <div class="feed" id="wlCards" style="padding:14px"></div>
+    </div>
+
+    <!-- POSITIONS -->
+    <div class="view" id="view-positions">
+      <div class="searchbar">
+        <div class="muted" style="margin-bottom:8px">Enter option contracts you hold, then get a position-aware AI take (where it stands, the move needed by expiry, breakeven). Educational, not advice.</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <input id="poTicker" placeholder="Ticker" style="flex:0 0 90px;text-transform:uppercase" />
+          <select id="poType" style="flex:0 0 80px"><option value="call">Call</option><option value="put">Put</option></select>
+          <input id="poStrike" type="number" step="0.5" placeholder="Strike" style="flex:0 0 90px" />
+          <input id="poExpiry" type="date" style="flex:0 0 150px" />
+          <input id="poQty" type="number" placeholder="Qty" value="1" style="flex:0 0 70px" />
+          <input id="poPrem" type="number" step="0.01" placeholder="Entry $/ct" style="flex:0 0 110px" />
+          <button id="poAdd" style="background:var(--blue);color:#04101f;border:none;border-radius:6px;padding:7px 16px;font:inherit;font-weight:700;cursor:pointer">Add</button>
+        </div>
+        <div id="poMsg" class="muted" style="margin-top:6px"></div>
+      </div>
+      <div class="feed" id="poCards" style="padding:14px"></div>
     </div>
 
     <!-- ANALYZE -->
@@ -686,6 +705,74 @@ async function addWatchlist(){
 document.getElementById('wlAdd').addEventListener('click', addWatchlist);
 document.getElementById('wlTicker').addEventListener('keydown', e => { if (e.key==='Enter') addWatchlist(); });
 
+// ---- My options (positions) ----
+function aiTakeHtml(take, model){
+  const html = (take||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/^([A-Z][A-Z &./]+:)/gm, '<b style="color:var(--blue)">$1</b>')
+    .replace(/\n/g,'<br>');
+  return '<div style="font-size:13px;line-height:1.6;margin-top:8px">'+html+'</div>'
+    + '<div class="muted" style="font-size:11px;margin-top:6px">'+(model||'')+' · educational, not financial advice</div>';
+}
+async function loadPositions(){
+  const box = document.getElementById('poCards');
+  if (!box.querySelector('.an-grid')) box.innerHTML = '<span class="muted">Loading…</span>';
+  try {
+    const rows = await (await fetch('/positions')).json();
+    if (!rows.length) { box.innerHTML = '<span class="muted">No positions yet. Add a contract you hold above.</span>'; return; }
+    box.innerHTML = '<div class="an-grid">' + rows.map(p => {
+      const t = (p.contract_type||'call')[0].toUpperCase();
+      const mny = p.moneyness ? `<span class="${p.moneyness==='ITM'?'an-up':'an-down'}">${p.moneyness}</span>` : '';
+      const toStrike = p.pct_to_strike==null ? '' : `${p.pct_to_strike>0?'+':''}${p.pct_to_strike}% to strike`;
+      return `<div class="an-card" id="po-${p.id}">
+        <div class="an-row" style="margin-bottom:4px">
+          <span><b class="tk">${p.ticker} $${p.strike}${t}</b> <span class="muted">${p.expiry}</span></span>
+          <span style="cursor:pointer;color:var(--muted)" onclick="deletePosition(${p.id})">✕</span>
+        </div>
+        <div class="an-row" style="font-size:12px"><span>${p.contracts}x · spot ${money(p.spot)} ${mny}</span><span class="muted">${p.days_to_expiry!=null?p.days_to_expiry+'d left':''}</span></div>
+        <div class="an-row muted" style="font-size:12px"><span>${toStrike}${p.entry_premium!=null?' · entry $'+p.entry_premium:''}</span></div>
+        ${p.note?`<div class="muted" style="font-size:11px">${p.note}</div>`:''}
+        <div style="margin-top:8px"><button onclick="positionAi(${p.id})" style="background:var(--purple);color:#0b0e14;border:none;border-radius:6px;padding:6px 14px;font:inherit;font-weight:700;cursor:pointer">AI take on this position</button></div>
+        <div id="poAi-${p.id}"></div>
+      </div>`;
+    }).join('') + '</div>';
+  } catch (e) { box.innerHTML = '<span class="muted">Could not load positions.</span>'; }
+}
+async function positionAi(id){
+  const box = document.getElementById('poAi-'+id);
+  box.innerHTML = '<span class="muted" style="font-size:12px">Thinking… (a few seconds)</span>';
+  try {
+    const r = await fetch('/positions/'+id+'/ai');
+    if (r.status === 503) { box.innerHTML = '<span class="muted" style="font-size:12px">AI analyst disabled — set ANTHROPIC_API_KEY and restart.</span>'; return; }
+    if (!r.ok) { const e = await r.json().catch(()=>({detail:'error'})); box.innerHTML = '<span class="muted" style="font-size:12px">'+(e.detail||'error')+'</span>'; return; }
+    const d = await r.json();
+    box.innerHTML = aiTakeHtml(d.take, d.model);
+  } catch (e) { box.innerHTML = '<span class="muted" style="font-size:12px">Could not generate take.</span>'; }
+}
+async function deletePosition(id){
+  await fetch('/positions/'+id, { method:'DELETE' });
+  loadPositions();
+}
+async function addPosition(){
+  const body = {
+    ticker: document.getElementById('poTicker').value.trim().toUpperCase(),
+    contract_type: document.getElementById('poType').value,
+    strike: parseFloat(document.getElementById('poStrike').value),
+    expiry: document.getElementById('poExpiry').value,
+    contracts: parseInt(document.getElementById('poQty').value||'1'),
+    entry_premium: document.getElementById('poPrem').value ? parseFloat(document.getElementById('poPrem').value) : null,
+  };
+  const msg = document.getElementById('poMsg');
+  if (!body.ticker || !body.strike || !body.expiry) { msg.textContent = 'Ticker, strike and expiry are required.'; return; }
+  try {
+    const r = await fetch('/positions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (!r.ok) { msg.textContent = 'Could not add position.'; return; }
+    msg.textContent = 'Added.';
+    ['poTicker','poStrike','poExpiry','poPrem'].forEach(i=>document.getElementById(i).value='');
+    loadPositions();
+  } catch (e) { msg.textContent = 'Could not add position.'; }
+}
+document.getElementById('poAdd').addEventListener('click', addPosition);
+
 // ---- Tabs + polling ----
 let activeTab = 'live', poll = null;
 function setTab(name) {
@@ -698,6 +785,7 @@ function setTab(name) {
   if (name === 'journal')   { loadJournal();   poll = setInterval(loadJournal, 15000); }
   if (name === 'levels')    { loadLevels(); }
   if (name === 'watchlist') { loadWatchlist(); poll = setInterval(loadWatchlist, 30000); }
+  if (name === 'positions') { loadPositions(); }
   if (name === 'analyze')   { document.getElementById('anInput').focus(); }
 }
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => setTab(t.dataset.tab)));

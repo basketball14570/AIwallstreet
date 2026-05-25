@@ -49,6 +49,8 @@ async def _top_tickers(limit: int, lookback_hours: int = 24) -> list[str]:
 
 
 async def run_ai_scan() -> dict:
+    if not settings.ai_scan_enabled:
+        return {"sent": False, "reason": "scan disabled (AI_SCAN_ENABLED=false)"}
     if not settings.anthropic_api_key:
         return {"sent": False, "reason": "no ANTHROPIC_API_KEY"}
     tickers = await _top_tickers(settings.ai_scan_top_n)

@@ -9,6 +9,7 @@ Core tables:
   outcome          -- realised forward returns used for labelling / backtest
   journal_entry    -- user-saved trade ideas + the forward prices we track for them
   analyst_levels   -- trusted weekly support/resistance levels, imported by paste
+  position         -- option contracts the user actually holds, for AI analysis
 """
 from __future__ import annotations
 
@@ -213,4 +214,22 @@ class AnalystLevels(Base):
     supports: Mapped[list] = mapped_column(JSONB, default=list)     # below price
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Position(Base):
+    """An option contract the user actually holds — for position-aware AI takes."""
+
+    __tablename__ = "position"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(String(16), index=True)
+    contract_type: Mapped[str] = mapped_column(String(4))  # call / put
+    strike: Mapped[float] = mapped_column(Float)
+    expiry: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    contracts: Mapped[int] = mapped_column(Integer, default=1)
+    entry_premium: Mapped[float | None] = mapped_column(Float)  # $ paid per contract
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
     )

@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     llm_model: str = "claude-opus-4-7"
     llm_effort: str = "high"            # low | medium | high | xhigh | max
+    # Proactive nightly scan is OFF by default — the API key alone only powers
+    # the on-demand "AI take" button. Flip this on when you want the daily push.
+    ai_scan_enabled: bool = False
     ai_scan_top_n: int = 3              # how many top setups the daily scan writes up
 
     # Datastores
