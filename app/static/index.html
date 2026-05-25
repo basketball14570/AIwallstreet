@@ -521,6 +521,10 @@ async function loadAnalysis(ticker){
       <div class="an-card" style="margin-top:14px"><h3>Read</h3>
         <ul class="an-notes">${(d.notes||[]).map(n=>'<li>'+n+'</li>').join('')}</ul>
       </div>
+      <div class="an-card" style="margin-top:14px;border-color:var(--purple)">
+        <h3>★ AI analyst take</h3>
+        <div id="aiTake"><button id="aiBtn" onclick="loadAiTake('${d.ticker}')" style="background:var(--purple);color:#0b0e14;border:none;border-radius:6px;padding:8px 16px;font:inherit;font-weight:700;cursor:pointer">Generate AI take</button> <span class="muted" style="font-size:11px">Claude reasons over the flow + technicals + your levels. Educational, not advice.</span></div>
+      </div>
       <div class="muted" style="margin-top:10px;font-size:11px">Mechanical technical analysis from daily bars (${d.data_source}). Not financial advice.</div>`;
     renderTradingView(d.ticker);
   } catch (e) {
@@ -530,6 +534,22 @@ async function loadAnalysis(ticker){
 document.getElementById('anInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') loadAnalysis(e.target.value.trim().toUpperCase());
 });
+async function loadAiTake(ticker){
+  const box = document.getElementById('aiTake');
+  box.innerHTML = '<span class="muted">Thinking… (a few seconds)</span>';
+  try {
+    const r = await fetch('/analysis/'+encodeURIComponent(ticker)+'/ai');
+    if (r.status === 503) { box.innerHTML = '<span class="muted">AI analyst is disabled — set ANTHROPIC_API_KEY in your .env and restart.</span>'; return; }
+    if (!r.ok) { const e = await r.json().catch(()=>({detail:'error'})); box.innerHTML = '<span class="muted">'+(e.detail||'Could not generate take.')+'</span>'; return; }
+    const d = await r.json();
+    // Render the take preserving line breaks; bold the SECTION: headers.
+    const html = (d.take||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/^([A-Z][A-Z ./]+:)/gm, '<b style="color:var(--blue)">$1</b>')
+      .replace(/\n/g,'<br>');
+    box.innerHTML = '<div style="font-size:13px;line-height:1.6">'+html+'</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:8px">'+(d.model||'')+' · educational, not financial advice</div>';
+  } catch (e) { box.innerHTML = '<span class="muted">Could not generate take.</span>'; }
+}
 
 // ---- Journal ----
 function moveCell(m){

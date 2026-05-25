@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     # "reports in N days" warning; left blank, no earnings line is shown (we
     # never fabricate one — Polygon's plan doesn't include earnings dates).
     finnhub_api_key: str = ""
+    # AI analyst (Anthropic). When ANTHROPIC_API_KEY is set, the dashboard's
+    # "AI analyst take" and the proactive scanner use Claude to reason over the
+    # flow + technicals + your levels. Left blank, those features are disabled.
+    anthropic_api_key: str = ""
+    llm_model: str = "claude-opus-4-7"
+    llm_effort: str = "high"            # low | medium | high | xhigh | max
 
     # Datastores
     database_url: str = "postgresql+asyncpg://flow:flow@localhost:5432/flow"
