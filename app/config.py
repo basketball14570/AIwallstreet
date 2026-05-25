@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     llm_model: str = "claude-opus-4-7"
     llm_effort: str = "high"            # low | medium | high | xhigh | max
+    ai_scan_top_n: int = 3              # how many top setups the daily scan writes up
 
     # Datastores
     database_url: str = "postgresql+asyncpg://flow:flow@localhost:5432/flow"
