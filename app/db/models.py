@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -32,11 +33,20 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
+# Cross-dialect JSON column: Postgres uses native JSONB (indexable, efficient);
+# SQLite (the zero-infra "lite" / free-hosting path) falls back to generic JSON.
+# Same Python dict/list interface either way, so models and queries are unchanged.
+JSONType = JSONB().with_variant(JSON(), "sqlite")
+
+# Auto-incrementing primary key. Postgres uses BIGINT; SQLite only auto-generates
+# rowids for INTEGER PRIMARY KEY (BIGINT stays NULL), so it falls back to Integer.
+BigIntPK = BigInteger().with_variant(Integer, "sqlite")
+
 
 class RawFlow(Base):
     __tablename__ = "raw_flow"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     source: Mapped[str] = mapped_column(String(32), index=True)  # unusual_whales etc.
     external_id: Mapped[str | None] = mapped_column(String(128), index=True)
     ticker: Mapped[str] = mapped_column(String(16), index=True)
@@ -52,7 +62,7 @@ class RawFlow(Base):
     size: Mapped[int] = mapped_column(Integer)  # contracts
     spot: Mapped[float | None] = mapped_column(Float)  # underlying price at trade
 
-    raw: Mapped[dict] = mapped_column(JSONB, default=dict)
+    raw: Mapped[dict] = mapped_column(JSONType, default=dict)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -102,7 +112,7 @@ class FlowFeatures(Base):
     news_score: Mapped[float] = mapped_column(Float, default=0.0)
     historical_similarity: Mapped[float] = mapped_column(Float, default=0.0)
 
-    vector: Mapped[dict] = mapped_column(JSONB, default=dict)  # full raw feature dict
+    vector: Mapped[dict] = mapped_column(JSONType, default=dict)  # full raw feature dict
 
     flow: Mapped["RawFlow"] = relationship(back_populates="features")
 
@@ -119,8 +129,8 @@ class FlowScore(Base):
     squeeze_prob: Mapped[float] = mapped_column(Float)
     momentum_prob: Mapped[float] = mapped_column(Float)
     fake_flow_prob: Mapped[float] = mapped_column(Float)
-    component_scores: Mapped[dict] = mapped_column(JSONB, default=dict)
-    reasons: Mapped[dict] = mapped_column(JSONB, default=dict)
+    component_scores: Mapped[dict] = mapped_column(JSONType, default=dict)
+    reasons: Mapped[dict] = mapped_column(JSONType, default=dict)
     regime: Mapped[str] = mapped_column(String(40), default="neutral", index=True)
     model_version: Mapped[str] = mapped_column(String(40), default="rules-0.1")
     created_at: Mapped[datetime] = mapped_column(
@@ -133,13 +143,13 @@ class FlowScore(Base):
 class Alert(Base):
     __tablename__ = "alert"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     flow_id: Mapped[int] = mapped_column(ForeignKey("raw_flow.id", ondelete="CASCADE"))
     ticker: Mapped[str] = mapped_column(String(16), index=True)
     classification: Mapped[str] = mapped_column(String(40))
     confidence: Mapped[float] = mapped_column(Float)
     summary: Mapped[str] = mapped_column(Text)
-    channels: Mapped[dict] = mapped_column(JSONB, default=dict)  # delivery status
+    channels: Mapped[dict] = mapped_column(JSONType, default=dict)  # delivery status
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -180,7 +190,7 @@ class JournalEntry(Base):
 
     __tablename__ = "journal_entry"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     ticker: Mapped[str] = mapped_column(String(16), index=True)
     contract_type: Mapped[str] = mapped_column(String(4))  # call / put
     strike: Mapped[float | None] = mapped_column(Float)
@@ -210,8 +220,8 @@ class AnalystLevels(Base):
     ticker: Mapped[str] = mapped_column(String(16), primary_key=True)
     clb36: Mapped[float | None] = mapped_column(Float)        # CLB36+B1:C column
     weekly_cpl: Mapped[float | None] = mapped_column(Float)   # WEEKLY CPL column
-    resistances: Mapped[list] = mapped_column(JSONB, default=list)  # above price
-    supports: Mapped[list] = mapped_column(JSONB, default=list)     # below price
+    resistances: Mapped[list] = mapped_column(JSONType, default=list)  # above price
+    supports: Mapped[list] = mapped_column(JSONType, default=list)     # below price
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -222,7 +232,7 @@ class Position(Base):
 
     __tablename__ = "position"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
     ticker: Mapped[str] = mapped_column(String(16), index=True)
     contract_type: Mapped[str] = mapped_column(String(4))  # call / put
     strike: Mapped[float] = mapped_column(Float)

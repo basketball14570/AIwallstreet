@@ -393,3 +393,33 @@ aggressor-side inference, auth.
 - **ML**: nightly retrain + calibration job, champion/challenger model registry,
   monitor live precision vs. backtest for drift.
 ```
+
+---
+
+## 12. Alerts & deployment shapes
+
+**How you get notified.** Two push channels (Discord, Telegram) are built in and
+both are **opt-in** — a channel only fires if you set its keys; otherwise its
+`send` is a no-op. For a **dashboard-only** setup (no phone push), leave all
+alert keys blank and just open the website: the live feed, the **Breakout
+screener**, and the **Analyze** tab need no alert channel.
+
+**Two deployment shapes:**
+
+| | Scaled (default) | Free single-container "lite" |
+|---|---|---|
+| Database | Postgres | **SQLite** (`sqlite+aiosqlite:///…`) |
+| Event bus | Redis pub/sub + Streams | **in-memory bus** (`REDIS_URL` blank) |
+| Pipeline | separate `app.worker` | **in-process** (`RUN_PIPELINE_INPROCESS=true`) |
+| Runs on | docker-compose / k8s | one free web service (Render, Fly, HF Spaces) |
+
+The schema is dialect-portable (`JSONB`→`JSON`, `BIGINT`→`INTEGER` on SQLite) and
+`app/core/redis_client.py` transparently swaps Redis for an in-process broker +
+cache when `REDIS_URL` is blank, so the **same code** runs both ways. The lite
+path lets the whole app — dashboard, screener, stock analysis, and a live
+(synthetic) flow feed — run as a single container with **no external services**,
+which is what makes free hosting possible. Step-by-step (incl. a custom
+subdomain): **[DEPLOY_FREE.md](DEPLOY_FREE.md)**.
+
+> ⚠️ The dashboard currently has **no authentication** — anyone with the URL can
+> view it. Fine for a private bookmark; add a password before linking it publicly.

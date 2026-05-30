@@ -31,9 +31,17 @@ class Settings(BaseSettings):
     ai_scan_enabled: bool = False
     ai_scan_top_n: int = 3              # how many top setups the daily scan writes up
 
-    # Datastores
+    # Datastores. For zero-infra / free single-container hosting, set:
+    #   DATABASE_URL=sqlite+aiosqlite:///./data/app.db   (no Postgres)
+    #   REDIS_URL=                                        (blank -> in-memory bus)
+    # Postgres + Redis remain the default for the docker-compose / scaled setup.
     database_url: str = "postgresql+asyncpg://flow:flow@localhost:5432/flow"
     redis_url: str = "redis://localhost:6379/0"
+    # Run the real-time flow pipeline (and so populate the live dashboard feed)
+    # inside the API process instead of a separate worker. This is what makes the
+    # single-container "lite" deploy show live flow with no worker/Redis. Leave
+    # False for the scaled setup where a dedicated `python -m app.worker` runs it.
+    run_pipeline_inprocess: bool = False
 
     # Alerts
     discord_webhook_url: str = ""

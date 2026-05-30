@@ -1,0 +1,33 @@
+# Render Blueprint — one free web service, no external database or Redis.
+# Deploy: push this repo to GitHub, then on render.com choose
+# "New +" → "Blueprint" and point it at the repo. Render reads this file.
+#
+# This runs the whole app (dashboard + breakout screener + stock analysis +
+# live synthetic options flow) in a single container using SQLite + an in-memory
+# event bus. Free web services sleep after ~15 min idle and cold-start on the
+# next visit; the SQLite file is ephemeral (resets on redeploy), which is fine —
+# the screener and analysis are stateless and flow re-accumulates on its own.
+services:
+  - type: web
+    name: aiwallstreet
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      # SQLite instead of Postgres (/tmp is always writable on Render).
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:////tmp/app.db
+      # Blank => in-memory event bus instead of Redis.
+      - key: REDIS_URL
+        value: ""
+      # Run the real-time pipeline inside the web process so the live feed fills.
+      - key: RUN_PIPELINE_INPROCESS
+        value: "true"
+      # No market-data key => realistic synthetic flow + price history, so the
+      # app is fully functional out of the box. Add POLYGON_API_KEY for live data.
+      - key: FLOW_PROVIDER
+        value: synthetic
+      - key: ENV
+        value: prod
+      # Add POLYGON_API_KEY / ANTHROPIC_API_KEY in the Render dashboard (kept out
+      # of source) to switch on live prices and the AI analyst take.

@@ -36,7 +36,19 @@ log = get_logger("main")
 async def lifespan(app: FastAPI):
     await init_db()
     log.info("startup", env=settings.env)
+    tasks: list = []
+    # Single-container "lite" mode: run the real-time pipeline in-process so the
+    # dashboard's live feed populates with no separate worker or Redis. The
+    # in-memory bus (see core/redis_client) carries events to the WebSocket.
+    if settings.run_pipeline_inprocess:
+        import asyncio
+
+        from app.pipeline.realtime import Pipeline
+        tasks.append(asyncio.create_task(Pipeline().run()))
+        log.info("in-process pipeline started")
     yield
+    for t in tasks:
+        t.cancel()
     log.info("shutdown")
 
 
