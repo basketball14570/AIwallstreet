@@ -460,6 +460,46 @@ function chartLegend(lines, hist){
     .map(l => `<span style="margin-right:14px"><span style="color:${l.color}">▬</span> ${l.label} ${money(l.y)}</span>`).join('');
   return `<div class="muted" style="font-size:11px;margin:6px 2px 14px">${items}${span}</div>`;
 }
+function srZonesHtml(d){
+  const levels = d.sr_levels || [];
+  if (!levels.length) return '';
+  const row = l => {
+    const cls = l.kind==='resistance' ? 'an-down' : 'an-up';
+    const stars = '★'.repeat(l.strength) + '☆'.repeat(3-l.strength);
+    const conf = (l.confluence||[]).length ? ` <span class="muted" style="font-size:11px">${l.confluence.join(' · ')}</span>` : '';
+    return `<div class="an-row"><span><b class="${cls}">${money(l.price)}</b> <span class="muted" style="font-size:11px">${l.distance_pct>0?'+':''}${l.distance_pct}%</span>${conf}</span><span style="color:var(--amber)">${stars}</span></div>`;
+  };
+  const res = levels.filter(l=>l.kind==='resistance');   // nearest-first
+  const sup = levels.filter(l=>l.kind==='support');
+  return `<div class="an-card" style="grid-column:1/-1">
+    <h3>Support &amp; resistance zones (strength = how often / recently tested)</h3>
+    <div class="chart-cols" style="gap:24px">
+      <div><div class="muted" style="font-size:11px;margin-bottom:4px">RESISTANCE (overhead)</div>${res.map(row).join('')||'<div class="muted">none above</div>'}</div>
+      <div><div class="muted" style="font-size:11px;margin-bottom:4px">SUPPORT (below)</div>${sup.map(row).join('')||'<div class="muted">none below</div>'}</div>
+    </div>
+  </div>`;
+}
+function playbookHtml(d){
+  const pb = d.playbook || [];
+  if (!pb.length) return '';
+  const card = p => {
+    const isCall = p.side==='calls';
+    const bcol = isCall ? 'var(--green)' : 'var(--red)';
+    const rr = p.reward_risk!=null ? `<span style="color:${p.reward_risk>=2?'var(--green)':'var(--amber)'}">${p.reward_risk}:1</span>` : '—';
+    return `<div class="an-card" style="border-left:3px solid ${bcol}">
+      <div class="an-row" style="margin-bottom:4px"><b style="color:${bcol};text-transform:uppercase;font-size:12px;letter-spacing:.5px">${p.bias} · buy ${p.side}</b><span class="muted" style="font-size:11px">strike ~${money(p.suggested_strike)}</span></div>
+      <div style="font-size:13px;margin-bottom:6px">Trigger: <b style="color:var(--txt)">${p.trigger}</b></div>
+      <div class="an-row"><span class="muted">Target</span><b class="an-up">${money(p.target)}</b></div>
+      <div class="an-row"><span class="muted">Stop</span><b class="an-down">${money(p.stop)}</b></div>
+      <div class="an-row"><span class="muted">Reward : risk</span><b>${rr}</b></div>
+      ${p.reachability?`<div class="muted" style="font-size:11px;margin-top:4px">${p.reachability}</div>`:''}
+      <div class="muted" style="font-size:11px;margin-top:4px">${p.note}</div>
+    </div>`;
+  };
+  return `<div style="margin-top:14px"><h4 style="margin:0 0 8px">Options playbook — when these levels argue for calls vs puts</h4>
+    <div class="an-grid">${pb.map(card).join('')}</div>
+    <div class="muted" style="font-size:11px">Mechanical, level-based scenarios — not trade recommendations. Options can expire worthless.</div></div>`;
+}
 async function loadAnalysis(ticker){
   const box = document.getElementById('anResult');
   if (!ticker) { box.innerHTML = '<span class="muted">Type a ticker above and press Enter.</span>'; return; }
@@ -542,8 +582,10 @@ async function loadAnalysis(ticker){
           <div class="an-row"><span>From high</span><b class="${d.pct_from_high<=-25?'an-down':'an-neutral'}">${d.pct_from_high==null?'—':d.pct_from_high+'%'}</b></div>
         </div>
       </div>
+      ${srZonesHtml(d)}
       <div class="an-alert"><b>↑ Breakout alert:</b> set at ${money(d.breakout_above)} — above this targets ${money(d.upside_target)}.</div>
       <div class="an-alert dn"><b>↓ Breakdown alert:</b> set at ${money(d.breakdown_below)} — below this is a warning sign.</div>
+      ${playbookHtml(d)}
       <div class="an-card" style="margin-top:14px"><h3>Read</h3>
         <ul class="an-notes">${(d.notes||[]).map(n=>'<li>'+n+'</li>').join('')}</ul>
       </div>

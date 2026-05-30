@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 from app.analysis.levels import _swings, _SWING_WINDOW
+from app.analysis.support_resistance import analyze_levels
 from app.core.logging import get_logger
 from app.providers.prices import PriceHistoryProvider
 
@@ -233,4 +234,15 @@ async def analyze(ticker: str) -> dict:
         current=current, history=history,
         notes=notes,
     )
-    return asdict(read)
+    result = asdict(read)
+    # Ranked S/R zones + the level-anchored options playbook (when to buy/sell
+    # calls vs puts off these levels). Reuses the bars/atr/smas computed above.
+    try:
+        result.update(analyze_levels(
+            bars, spot, atr=atr,
+            smas={"sma20": sma20, "sma50": sma50, "sma200": sma200},
+            trend=trend,
+        ))
+    except Exception as exc:  # noqa: BLE001 — never let level analysis drop the read
+        log.warning("level analysis failed", ticker=ticker, error=str(exc))
+    return result

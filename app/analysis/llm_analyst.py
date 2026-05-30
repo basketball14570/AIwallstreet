@@ -160,6 +160,21 @@ def _render_user_prompt(ctx: dict) -> str:
             f"52W: {_fmt(ta.get('low_52w'))}–{_fmt(ta.get('high_52w'))} "
             f"({_fmt(ta.get('pct_from_high'))}% from high)",
         ]
+        zones = ta.get("sr_levels") or []
+        if zones:
+            lines.append("RANKED S/R ZONES (nearest-first, strength 1-3 stars, "
+                         "with confluence):")
+            for z in zones:
+                conf = f" [{', '.join(z['confluence'])}]" if z.get("confluence") else ""
+                lines.append(
+                    f"  - {z['kind']} ${_fmt(z['price'])} "
+                    f"({z['distance_pct']:+.1f}%, {'★' * z['strength']}, "
+                    f"{z['touches']} touch){conf}")
+        for p in (ta.get("playbook") or []):
+            rr = f", R:R {p['reward_risk']}" if p.get("reward_risk") else ""
+            lines.append(
+                f"PLAYBOOK ({p['bias']} {p['side']}): on {p['trigger']} → "
+                f"target {_fmt(p['target'])}, stop {_fmt(p['stop'])}{rr}")
     a = ctx["analyst_levels"]
     if a:
         lines.append(f"ANALYST WEEKLY LEVELS: resistance (above) {a['resistances']}, "

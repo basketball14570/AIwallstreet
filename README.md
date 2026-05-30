@@ -110,6 +110,8 @@ Alembic and is idempotent alongside it.)
 | GET  | `/screener` | self-driven technical breakout scan over the universe, ranked, with flow confluence |
 | GET  | `/screener/{ticker}` | the breakout read for one ticker (any score) |
 | GET  | `/analysis/{ticker}` | on-demand technical read (trend, RSI/MACD, S/R, levels) |
+| GET  | `/analysis/{ticker}/levels` | ranked S/R zones + level-anchored options playbook (calls vs puts, trigger/target/stop/R:R/strike) |
+| GET  | `/analysis/{ticker}/ai` | Claude's analyst take over flow + technicals + levels |
 | GET/POST/DELETE | `/watchlist` | watchlist CRUD |
 | WS   | `/ws/flow` | live stream of scored flow (bridges Redis `flow.events`) |
 | GET  | `/` | live web dashboard (vanilla JS, no build step) |
@@ -193,6 +195,37 @@ GET /screener/AAPL            # one ticker's breakout read
 
 The nightly job pushes the day's shortlist to Telegram/Discord when
 `SCREENER_SCAN_ENABLED=true` (off by default; the endpoint always works).
+
+## 5c. Support/resistance zones + options playbook
+
+Ask about any ticker and get the two things you need to *time* an options entry
+(`app/analysis/support_resistance.py`, surfaced on the **Analyze** tab and at
+`GET /analysis/{ticker}/levels`):
+
+* **Ranked S/R zones** — swing pivots are clustered into price *zones* (a level
+  is a shelf, not one exact tick), each scored **1–3 stars** by how many times
+  and how recently it was tested, with **confluence** tags (a moving average, a
+  round number, or the 52-week extreme on the same shelf strengthens it). Zones
+  are returned nearest-first, with each one's distance from the current price.
+* **A level-anchored options playbook** — concrete scenarios mapping the levels
+  to a directional options idea:
+
+  | Scenario | Side | Trigger | Stop |
+  |---|---|---|---|
+  | Breakout | **calls** | daily close above the nearest resistance | failed move back inside |
+  | Bounce | **calls** | price tests nearest support and holds | just below support |
+  | Breakdown | **puts** | daily close below the nearest support | failed move back inside |
+  | Rejection | **puts** | price tests nearest resistance and rejects | just above resistance |
+
+  Each carries an entry reference, a **target** (the next zone, or a measured
+  move), a **stop**, a rough **reward:risk**, a **suggested strike** near the
+  trigger, and an **ATR-based reachability** read ("~2 typical daily moves away —
+  reachable" vs "a stretch; needs a catalyst"). Breakout/breakdown stops sit on a
+  *failed move* (a tight buffer back inside the level), not the far next level, so
+  the reward:risk stays honest. Educational scenarios — not recommendations.
+
+The same structured zones + playbook are fed to the AI analyst take, so Claude
+reasons over the ranked levels rather than a flat min/max.
 
 ## 6. ML pipeline
 

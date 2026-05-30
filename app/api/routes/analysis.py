@@ -28,6 +28,35 @@ async def technical_analysis(ticker: str, session: AsyncSession = Depends(get_se
     return result
 
 
+@router.get("/{ticker}/levels")
+async def support_resistance(ticker: str, session: AsyncSession = Depends(get_session)):
+    """Ranked support/resistance zones plus a level-anchored options playbook —
+    when a break above resistance argues for calls, when a hold at support does,
+    when a breakdown/rejection argues for puts — each with trigger, target, stop,
+    reward:risk and a strike to watch. Built from real daily bars. Educational,
+    not financial advice."""
+    ta = await analyze(ticker)
+    if ta.get("data_source") == "unavailable":
+        return {"ticker": ticker.upper(), "data_source": "unavailable",
+                "error": ta.get("error")}
+    out = {
+        "ticker": ta["ticker"], "spot": ta.get("spot"), "current": ta.get("current"),
+        "trend": ta.get("trend"), "atr": ta.get("atr"),
+        "typical_move_pct": ta.get("typical_move_pct"),
+        "sr_levels": ta.get("sr_levels", []), "playbook": ta.get("playbook", []),
+        "nearest_resistance": ta.get("nearest_resistance"),
+        "nearest_support": ta.get("nearest_support"),
+        "data_source": ta.get("data_source"),
+    }
+    try:  # analyst-levels enrichment is optional — never block the playbook on it
+        a = await session.get(AnalystLevels, ticker.upper())
+        if a:
+            out["analyst"] = {"resistances": a.resistances, "supports": a.supports}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("analyst-levels lookup failed", ticker=ticker, error=str(exc))
+    return out
+
+
 @router.get("/{ticker}/ai")
 async def ai_take(ticker: str):
     """Claude's plain-English analyst take, reasoning over the flow + technicals
