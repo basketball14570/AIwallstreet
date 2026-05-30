@@ -20,6 +20,7 @@ from app.api.routes import (
     journal,
     levels,
     positions,
+    screener,
     watchlist,
     ws,
 )
@@ -50,6 +51,7 @@ app.include_router(analysis.router)
 app.include_router(journal.router)
 app.include_router(levels.router)
 app.include_router(positions.router)
+app.include_router(screener.router)
 
 _STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")

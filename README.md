@@ -64,6 +64,7 @@ app/
   schemas/               # Pydantic domain types (FlowEvent, ScoreResult, ...)
   providers/             # data ingestion (UW flow, Polygon context, sentiment)
   scoring/               # features → engine (weighted) → classifier   ← core IP
+  analysis/screener.py   # self-driven technical breakout screener (price/volume only)
   pipeline/realtime.py   # ingest→score→persist→alert orchestration
   alerts/                # Discord, Telegram, summary generation
   api/routes/            # flow, watchlist, websocket endpoints
@@ -106,6 +107,9 @@ Alembic and is idempotent alongside it.)
 | GET  | `/health` | liveness |
 | POST | `/flow/score` | score an arbitrary `FlowEvent` (+ optional context); no persistence |
 | GET  | `/flow/recent` | recent scored flow, filter by `min_confidence` / `classification` |
+| GET  | `/screener` | self-driven technical breakout scan over the universe, ranked, with flow confluence |
+| GET  | `/screener/{ticker}` | the breakout read for one ticker (any score) |
+| GET  | `/analysis/{ticker}` | on-demand technical read (trend, RSI/MACD, S/R, levels) |
 | GET/POST/DELETE | `/watchlist` | watchlist CRUD |
 | WS   | `/ws/flow` | live stream of scored flow (bridges Redis `flow.events`) |
 | GET  | `/` | live web dashboard (vanilla JS, no build step) |
@@ -150,6 +154,45 @@ Potential Explosion Setup` (plus `Fake / Low-Quality Flow`). Every score carries
 human-readable `reasons` — that is the "explain WHY" output used in alerts.
 
 ---
+
+## 5b. Self-driven technical breakout screener
+
+The flow engine above is **reactive** — it scores option prints as they arrive.
+`app/analysis/screener.py` is the **proactive** counterpart: it sweeps a
+configurable universe of stocks and, from **price/volume alone (no options flow
+required)**, finds names mechanically coiling for an expansion move — *"about to
+explode"*. It scores the classic pre-breakout footprint, each factor normalised
+to `[0,1]` and combined with tunable weights into a `setup_score` (0–100):
+
+| Factor | What it measures |
+|---|---|
+| **coil** (0.28) | Bollinger Band width pinched to a multi-month low — a volatility squeeze that precedes range expansion (rewarded extra when *actively contracting*) |
+| **breakout_proximity** (0.22) | price pressed just under swing-high resistance / its 52-week high, where a break triggers momentum (blue-sky names score high too) |
+| **volume** (0.15) | dry-up on a quiet base, then the first pickup — supply exhausts, demand returns |
+| **trend** (0.15) | above a *rising* 50-day average (a base, not a falling knife) |
+| **momentum** (0.12) | RSI mid-range with MACD turning up; overbought blow-offs are penalised |
+| **rel_strength** (0.08) | holding trailing-week gains without going parabolic |
+
+Each candidate is classified — `Breakout Imminent → Coiling Tightly → Momentum
+Leader → Building a Base → No Setup` — and carries human-readable `reasons` plus
+**trade geometry**: a breakout trigger, an invalidation stop, and a measured-move
+target. The scoring is a **pure function** over a daily-OHLCV frame, so it is
+deterministic and unit-tested offline (`tests/test_screener.py`).
+
+**Confluence — where the two halves of the system meet.** `jobs/screener_scan.py`
+cross-references each coiling candidate against the unusual options flow the
+pipeline has already captured. A stock that is *both* coiling under resistance
+**and** showing fresh unusual call buying (`🔥`) is the highest-conviction
+"about to explode" candidate — technicals and smart-money flow agreeing — and is
+boosted and ranked first.
+
+```
+GET /screener                 # ranked universe sweep (+ flow confluence)
+GET /screener/AAPL            # one ticker's breakout read
+```
+
+The nightly job pushes the day's shortlist to Telegram/Discord when
+`SCREENER_SCAN_ENABLED=true` (off by default; the endpoint always works).
 
 ## 6. ML pipeline
 
@@ -287,7 +330,9 @@ the whole pipeline runs end-to-end offline for development.
 **Shipped MVP:** normalised ingest with mock fallback, weighted+explainable
 scoring engine, classification + 4 probabilities, async pipeline, Postgres
 schema, Redis pub/sub, WebSocket stream, Discord/Telegram alerts, watchlist API,
-triple-barrier labeling, calibrated training script, backtest engine, tests.
+triple-barrier labeling, calibrated training script, backtest engine, a
+**self-driven technical breakout screener** (squeeze/coil + breakout proximity,
+with options-flow confluence) exposed at `/screener` and pushed nightly, tests.
 
 The dashboard surfaces the screener signals directly: the live feed and the
 by-contract view show **IV-rank, vol/OI (with an OPEN tag), bullish-structure

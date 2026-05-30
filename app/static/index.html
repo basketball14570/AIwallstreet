@@ -132,6 +132,7 @@
   <div class="panel">
     <div class="tabs">
       <div class="tab active" data-tab="live">Live flow</div>
+      <div class="tab" data-tab="screener">Breakout screener</div>
       <div class="tab" data-tab="buys">Top buys</div>
       <div class="tab" data-tab="contracts">By contract</div>
       <div class="tab" data-tab="analyze">Analyze stock</div>
@@ -152,6 +153,12 @@
           <tbody id="rows"></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- SCREENER -->
+    <div class="view" id="view-screener">
+      <div class="searchbar muted">Stocks the system finds <b>on its own</b> from price/volume technicals — coiling for a breakout ("about to explode"), ranked. 🔥 = also showing unusual call flow (technicals + smart-money agree). Educational, not financial advice.</div>
+      <div class="feed" id="scrCards" style="padding:14px"></div>
     </div>
 
     <!-- TOP BUYS -->
@@ -773,6 +780,46 @@ async function addPosition(){
 }
 document.getElementById('poAdd').addEventListener('click', addPosition);
 
+// ---- Breakout screener ----
+function scoreColor(s){ return s>=75?'var(--green)':s>=60?'var(--blue)':s>=50?'var(--amber)':'var(--muted)'; }
+function factorBar(label, v){
+  const pct = Math.round((v||0)*100);
+  return `<div class="an-row" style="font-size:11px;align-items:center;gap:8px">
+    <span class="muted" style="flex:0 0 90px">${label}</span>
+    <span class="bar" style="flex:1"><i style="width:${pct}%"></i></span>
+    <span style="flex:0 0 28px;text-align:right">${pct}</span></div>`;
+}
+async function loadScreener(){
+  const box = document.getElementById('scrCards');
+  if (!box.querySelector('.an-grid')) box.innerHTML = '<span class="muted">Scanning the universe…</span>';
+  try {
+    const data = await (await fetch('/screener?min_score=0&top_n=60')).json();
+    const rows = data.candidates || [];
+    if (!rows.length) { box.innerHTML = '<span class="muted">No setups found right now.</span>'; return; }
+    box.innerHTML = `<div class="an-grid">` + rows.map(s => {
+      const f = s.factors || {};
+      const conf = s.unusual_call_flow ? ' 🔥' : '';
+      const flow = s.unusual_call_flow ? `<div class="an-row" style="font-size:11px;color:var(--purple);margin-top:4px">🔥 Unusual call flow${s.flow_premium?` (${fmtUsd(s.flow_premium)})`:''} — flow + technicals agree</div>` : '';
+      const trig = s.breakout_trigger ? `<div class="an-row" style="font-size:12px;margin-top:6px"><span class="muted">Break above</span><b>${money(s.breakout_trigger)}${s.target?` → ${money(s.target)}`:''}</b></div>` : '';
+      const stop = s.stop ? `<div class="an-row" style="font-size:12px"><span class="muted">Fails below</span><span>${money(s.stop)}</span></div>` : '';
+      const reasons = (s.reasons||[]).slice(0,3).map(r=>`<div class="muted" style="font-size:11px;margin-top:3px">• ${r.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>`).join('');
+      return `<div class="an-card">
+        <div class="an-row" style="margin-bottom:6px;align-items:center">
+          <span><b class="tk" style="font-size:15px">${s.ticker}${conf}</b> <span class="muted">${money(s.spot)}</span></span>
+          <b style="font-size:18px;color:${scoreColor(s.setup_score)}">${Math.round(s.setup_score)}</b>
+        </div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:${scoreColor(s.setup_score)};margin-bottom:8px">${s.classification}</div>
+        ${factorBar('Coil', f.coil)}
+        ${factorBar('Breakout', f.breakout_proximity)}
+        ${factorBar('Volume', f.volume)}
+        ${factorBar('Trend', f.trend)}
+        ${factorBar('Momentum', f.momentum)}
+        ${flow}${trig}${stop}${reasons}
+      </div>`;
+    }).join('') + `</div>`;
+  } catch (e) { box.innerHTML = '<span class="muted">Could not run the screener.</span>'; }
+}
+
 // ---- Tabs + polling ----
 let activeTab = 'live', poll = null;
 function setTab(name) {
@@ -780,6 +827,7 @@ function setTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===name));
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id===`view-${name}`));
   if (poll) { clearInterval(poll); poll = null; }
+  if (name === 'screener')  { loadScreener();  poll = setInterval(loadScreener, 60000); }
   if (name === 'buys')      { loadBuys();      poll = setInterval(loadBuys, 4000); }
   if (name === 'contracts') { loadContracts(); poll = setInterval(loadContracts, 5000); }
   if (name === 'journal')   { loadJournal();   poll = setInterval(loadJournal, 15000); }

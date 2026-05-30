@@ -17,6 +17,7 @@ from app.jobs.ai_scanner import run_ai_scan
 from app.jobs.backfill import backfill
 from app.jobs.digest import send_digest
 from app.jobs.retrain import retrain
+from app.jobs.screener_scan import run_scan
 
 log = get_logger("nightly")
 
@@ -34,7 +35,13 @@ async def run_once() -> dict:
     except Exception as exc:  # noqa: BLE001 — AI scan must never break maintenance
         log.error("ai scan failed", error=str(exc))
         ai = {"sent": False, "error": str(exc)}
-    result = {"backfill": bf, "retrain": rt, "digest": dg, "ai_scan": ai}
+    try:
+        sc = await run_scan()
+    except Exception as exc:  # noqa: BLE001 — screener must never break maintenance
+        log.error("screener scan failed", error=str(exc))
+        sc = {"sent": False, "error": str(exc)}
+    result = {"backfill": bf, "retrain": rt, "digest": dg, "ai_scan": ai,
+              "screener": sc}
     log.info("nightly done", **{k: str(v) for k, v in result.items()})
     return result
 

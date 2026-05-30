@@ -89,6 +89,28 @@ class Settings(BaseSettings):
     # cooldown stops one busy contract from alerting over and over.
     alert_startup_grace_sec: float = 120.0
     alert_cooldown_min: float = 360.0          # don't re-alert a contract for 6h
+    # ---- Technical breakout screener -------------------------------------
+    # The self-driven side of the system: sweep this universe of stocks and rank
+    # the ones mechanically coiling for an expansion ("about to explode") from
+    # price/volume alone — no options flow required. Defaults to the flow
+    # watchlist plus a broad set of liquid, high-beta movers; override freely.
+    screener_universe: str = (
+        "TSLA,NVDA,AAPL,AMD,PLTR,SOFI,GME,AMC,MARA,RIVN,"
+        "META,AMZN,GOOGL,MSFT,NFLX,COIN,SMCI,AVGO,MU,INTC,"
+        "BABA,UBER,SHOP,SQ,ROKU,DKNG,CCL,F,NIO,LCID,"
+        "AFRM,HOOD,SNAP,PINS,DDOG,NET,CRWD,PANW,ARM,DELL"
+    )
+    # Minimum composite setup score (0-100) for a candidate to be alerted/pushed.
+    screener_min_score: float = 70.0
+    # How many top candidates the proactive scan writes up / pushes.
+    screener_top_n: int = 5
+    # Proactive nightly screener push is OFF by default; the /screener endpoint
+    # works regardless. Flip on to get the daily "about to explode" shortlist.
+    screener_scan_enabled: bool = False
+    # Look-back window (hours) for cross-referencing unusual options flow when
+    # computing screener+flow confluence.
+    screener_flow_lookback_hours: int = 48
+
     # Watchlist price alerts: poll your watchlist this often and ping when a name
     # crosses its breakout (resistance) or breakdown (support) level.
     watchlist_poll_sec: float = 300.0
