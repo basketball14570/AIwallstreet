@@ -85,6 +85,41 @@ def _fmt(v) -> str:
     return "n/a" if v is None else (f"{v:g}" if isinstance(v, (int, float)) else str(v))
 
 
+BEGINNER_SYSTEM_PROMPT = """You are a patient mentor explaining a stock to a \
+COMPLETE BEGINNER who has never traded options. You are given structured data \
+about ONE ticker: where price is, what the chart looks like, key support and \
+resistance levels, and what the unusual options flow shows. Translate this \
+into plain English a 16-year-old could follow.
+
+HARD RULES — follow all of them:
+- This is EDUCATIONAL only. Never tell anyone to buy, sell, or hold. Use \
+words like "could", "might", "if".
+- NO jargon without immediate explanation. If you must use a term ("IV", \
+"OTM", "breakout"), explain it in plain words right after — or skip the term.
+- The flow data does NOT confirm buys vs sells. Describe it as "big options \
+trades are showing up around X strike", never "someone is betting on X".
+- Be honest about uncertainty. Options can lose 100% of their value. Most \
+options expire worthless. Say so.
+- Do NOT invent prices, news, earnings, or any data you weren't given.
+- Tight: a beginner should read the whole thing in under a minute.
+
+OUTPUT — use exactly these sections with these headers:
+WHAT'S HAPPENING: 2 sentences, plain English, on what the stock is doing right \
+now (trend, the key level it's near, anything notable in the flow).
+WHAT THE BIG MONEY MIGHT BE THINKING: 2-3 sentences interpreting the options \
+flow as a HINT, with the buy/sell caveat. Use everyday words.
+WHAT WOULD MAKE THIS GO UP: the price level that, if broken and held, would \
+suggest a real move up — and one sentence why.
+WHAT WOULD MAKE THIS GO DOWN: the level that, if broken, would suggest the \
+idea is wrong.
+IF A BEGINNER WANTED TO LEARN FROM THIS (NOT TRADE): one paragraph framing \
+this as a paper-trade or watch-and-learn opportunity — what to watch, what \
+they'd learn. Do NOT tell them what to buy.
+RISK IN PLAIN ENGLISH: one short paragraph. Worst case is total loss of \
+whatever they put in. Most options expire worthless. Markets surprise.
+"""
+
+
 def _position_math(pos: dict, spot: float | None) -> dict:
     """Moneyness, distance to strike, days left, breakeven — all from real inputs."""
     is_call = pos["contract_type"] == "call"
@@ -255,3 +290,28 @@ async def ai_position_take(pos: dict) -> dict:
              out_tokens=resp.usage.output_tokens)
     return {"ticker": ticker, "take": text, "model": settings.llm_model,
             "position_math": math}
+
+
+async def ai_beginner_take(ticker: str) -> dict:
+    """Beginner-friendly plain-English read on a ticker. Same data as the
+    analyst take, but with a system prompt that forbids jargon and frames the
+    output as watch-and-learn rather than as a trade idea."""
+    if not settings.anthropic_api_key:
+        raise RuntimeError("AI analyst is disabled (no ANTHROPIC_API_KEY set).")
+    import anthropic  # lazy
+
+    ctx = await _gather_context(ticker)
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    resp = await client.messages.create(
+        model=settings.llm_model,
+        max_tokens=2500,
+        thinking={"type": "adaptive"},
+        output_config={"effort": settings.llm_effort},
+        system=[{"type": "text", "text": BEGINNER_SYSTEM_PROMPT,
+                 "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": _render_user_prompt(ctx)}],
+    )
+    text = "".join(b.text for b in resp.content if b.type == "text").strip()
+    log.info("ai beginner take", ticker=ticker.upper(), model=settings.llm_model,
+             out_tokens=resp.usage.output_tokens)
+    return {"ticker": ticker.upper(), "take": text, "model": settings.llm_model}

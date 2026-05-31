@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.analysis.llm_analyst import ai_analyst_take
+from app.analysis.llm_analyst import ai_analyst_take, ai_beginner_take
 from app.analysis.technicals import analyze
 from app.config import settings
 from app.core.logging import get_logger
@@ -68,3 +68,16 @@ async def ai_take(ticker: str):
     except Exception as exc:  # noqa: BLE001
         log.error("ai take failed", ticker=ticker, error=str(exc))
         raise HTTPException(502, f"AI analyst error: {exc}") from exc
+
+
+@router.get("/{ticker}/beginner")
+async def ai_beginner(ticker: str):
+    """Plain-English beginner explanation: same data as /ai, no jargon, framed
+    as watch-and-learn instead of as a trade idea."""
+    if not settings.anthropic_api_key:
+        raise HTTPException(503, "AI analyst is disabled — set ANTHROPIC_API_KEY.")
+    try:
+        return await ai_beginner_take(ticker)
+    except Exception as exc:  # noqa: BLE001
+        log.error("ai beginner take failed", ticker=ticker, error=str(exc))
+        raise HTTPException(502, f"AI beginner take error: {exc}") from exc

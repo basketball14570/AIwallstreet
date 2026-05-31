@@ -135,6 +135,7 @@
       <div class="tab" data-tab="screener">Breakout screener</div>
       <div class="tab" data-tab="buys">Top buys</div>
       <div class="tab" data-tab="contracts">By contract</div>
+      <div class="tab" data-tab="smart">Smart Money</div>
       <div class="tab" data-tab="analyze">Analyze stock</div>
       <div class="tab" data-tab="journal">Journal</div>
       <div class="tab" data-tab="levels">Analyst levels</div>
@@ -253,6 +254,23 @@
         <div id="poMsg" class="muted" style="margin-top:6px"></div>
       </div>
       <div class="feed" id="poCards" style="padding:14px"></div>
+    </div>
+
+    <!-- SMART MONEY -->
+    <div class="view" id="view-smart">
+      <div class="searchbar muted">Tickers ranked by Smart Money Score — a weighted blend of aggressive buy premium, vol/OI unusualness, opening-print share, IV-rank discount, conviction, and contract breadth. Last 4h, refreshes every 30s. Click <b>Explain</b> for a beginner-mode read on any row.</div>
+      <div class="feed">
+        <table>
+          <thead><tr>
+            <th>#</th><th>Ticker</th><th class="num">SMS</th>
+            <th class="num">Bull %</th><th class="num">Buy $</th>
+            <th class="num">Vol/OI</th><th class="num">Contracts</th>
+            <th>Why</th><th></th>
+          </tr></thead>
+          <tbody id="smartRows"></tbody>
+        </table>
+      </div>
+      <div id="smartBeginnerCard" style="padding:14px;display:none"></div>
     </div>
 
     <!-- ANALYZE -->
@@ -862,6 +880,66 @@ async function loadScreener(){
   } catch (e) { box.innerHTML = '<span class="muted">Could not run the screener.</span>'; }
 }
 
+// ---- Smart Money ----
+function smFmtBuy(n) {
+  if (!n) return '$0';
+  if (n >= 1e6) return '$'+(n/1e6).toFixed(1)+'M';
+  if (n >= 1e3) return '$'+(n/1e3).toFixed(0)+'K';
+  return '$'+n.toFixed(0);
+}
+function smEsc(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+async function loadSmart() {
+  const tbody = document.getElementById('smartRows');
+  if (!tbody.innerHTML) tbody.innerHTML = '<tr><td colspan="9" class="muted">Loading…</td></tr>';
+  try {
+    const rows = await (await fetch('/flow/smart-money?limit=20')).json();
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="muted">No qualifying flow in the last 4h. Try again during market hours.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map((r, i) => {
+      const sms = r.smart_money_score;
+      const smsColor = sms >= 80 ? 'var(--green)' : sms >= 60 ? 'var(--amber)' : 'var(--muted)';
+      const tilt = r.bullish_tilt;
+      const tiltColor = tilt >= 60 ? 'var(--green)' : tilt <= 40 ? 'var(--red)' : 'var(--muted)';
+      const vo = r.max_vol_oi ? r.max_vol_oi.toFixed(1)+'x' : '—';
+      const reasons = (r.reasons||[]).join(' · ');
+      return `<tr>
+        <td>${i+1}</td>
+        <td><b>${r.ticker}</b></td>
+        <td class="num"><b style="color:${smsColor};font-size:14px">${sms.toFixed(0)}</b></td>
+        <td class="num" style="color:${tiltColor}">${tilt.toFixed(0)}%</td>
+        <td class="num">${smFmtBuy(r.bought_premium)}</td>
+        <td class="num">${vo}</td>
+        <td class="num">${r.distinct_contracts}</td>
+        <td class="muted" style="font-size:12px">${smEsc(reasons)}</td>
+        <td><button onclick="loadBeginnerTake('${r.ticker}')" style="background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 10px;font:inherit;font-size:11px;cursor:pointer">Explain</button></td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="9" class="muted">Failed to load.</td></tr>';
+  }
+}
+async function loadBeginnerTake(ticker) {
+  const card = document.getElementById('smartBeginnerCard');
+  card.style.display = 'block';
+  card.innerHTML = '<div class="an-card"><span class="muted">Asking Claude about '+ticker+'… (a few seconds)</span></div>';
+  try {
+    const r = await fetch('/analysis/'+encodeURIComponent(ticker)+'/beginner');
+    if (r.status === 503) { card.innerHTML = '<div class="an-card"><span class="muted">AI analyst disabled — set ANTHROPIC_API_KEY.</span></div>'; return; }
+    if (!r.ok) { const e = await r.json().catch(()=>({detail:'error'})); card.innerHTML = '<div class="an-card"><span class="muted">'+(e.detail||'Could not generate.')+'</span></div>'; return; }
+    const d = await r.json();
+    const html = smEsc(d.take||'')
+      .replace(/^([A-Z][A-Z &.()/]+:)/gm, '<b style="color:var(--blue)">$1</b>')
+      .replace(/\n/g,'<br>');
+    card.innerHTML = '<div class="an-card"><h3 style="color:var(--green)">★ Beginner Mode: '+d.ticker+'</h3>'
+      + '<div style="font-size:13px;line-height:1.6">'+html+'</div>'
+      + '<div class="muted" style="font-size:11px;margin-top:10px">'+(d.model||'')+' · educational, not financial advice</div></div>';
+  } catch (e) {
+    card.innerHTML = '<div class="an-card"><span class="muted">Could not generate.</span></div>';
+  }
+}
+
 // ---- Tabs + polling ----
 let activeTab = 'live', poll = null;
 function setTab(name) {
@@ -872,6 +950,7 @@ function setTab(name) {
   if (name === 'screener')  { loadScreener();  poll = setInterval(loadScreener, 60000); }
   if (name === 'buys')      { loadBuys();      poll = setInterval(loadBuys, 4000); }
   if (name === 'contracts') { loadContracts(); poll = setInterval(loadContracts, 5000); }
+  if (name === 'smart')     { loadSmart();     poll = setInterval(loadSmart, 30000); }
   if (name === 'journal')   { loadJournal();   poll = setInterval(loadJournal, 15000); }
   if (name === 'levels')    { loadLevels(); }
   if (name === 'watchlist') { loadWatchlist(); poll = setInterval(loadWatchlist, 30000); }

@@ -4,13 +4,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import String, case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_session
 from app.db.models import FlowFeatures, FlowScore, RawFlow
 from app.schemas.flow import FlowEvent, MarketContext, ScoreResult
 from app.scoring.classifier import classify
+from app.scoring.smart_money import TickerStats, compute_smart_money
 
 router = APIRouter(prefix="/flow", tags=["flow"])
 
@@ -149,3 +150,90 @@ async def contract_rollup(
             "bullish_structure": (r.bullish_structure or 0) >= 1.0,
         })
     return out
+
+
+@router.get("/smart-money")
+async def smart_money_leaderboard(
+    minutes: int = Query(240, le=1440, description="lookback window"),
+    limit: int = Query(20, le=100),
+    min_premium: float = Query(50_000.0, description="min total premium per ticker"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Ticker-level leaderboard ranked by the Smart Money Score — a weighted
+    blend of aggressive buy premium, vol/OI unusualness, opening-print share,
+    IV-rank discount, per-event conviction, and contract breadth. The
+    'where should I even look today?' view.
+    """
+    since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    ask_prem = case((RawFlow.side == "ask", RawFlow.premium), else_=0.0)
+    bid_prem = case((RawFlow.side == "bid", RawFlow.premium), else_=0.0)
+    call_prem = case((RawFlow.contract_type == "call", RawFlow.premium), else_=0.0)
+    put_prem = case((RawFlow.contract_type == "put", RawFlow.premium), else_=0.0)
+    opening_n = case((FlowFeatures.is_opening, 1), else_=0)
+    # Confidence weighted by premium so a single big print dominates a flurry
+    # of tiny low-quality ones (which is what we want).
+    weighted_conf_num = func.sum(FlowScore.confidence * RawFlow.premium)
+    # A contract identity for the breadth (distinct count) calculation.
+    contract_key = func.concat(
+        RawFlow.contract_type, ":",
+        func.cast(RawFlow.strike, String), ":",
+        func.cast(RawFlow.expiry, String),
+    )
+
+    stmt = (
+        select(
+            RawFlow.ticker,
+            func.sum(ask_prem).label("bought_premium"),
+            func.sum(bid_prem).label("sold_premium"),
+            func.sum(RawFlow.premium).label("total_premium"),
+            func.sum(call_prem).label("call_premium"),
+            func.sum(put_prem).label("put_premium"),
+            func.max(FlowFeatures.vol_oi).label("max_vol_oi"),
+            func.avg(FlowFeatures.iv_rank).label("avg_iv_rank"),
+            func.sum(opening_n).label("opening_prints"),
+            func.count().label("total_prints"),
+            weighted_conf_num.label("weighted_conf_num"),
+            func.count(func.distinct(contract_key)).label("distinct_contracts"),
+            func.max(RawFlow.observed_at).label("last_seen"),
+        )
+        .join(FlowFeatures, FlowFeatures.flow_id == RawFlow.id)
+        .join(FlowScore, FlowScore.flow_id == RawFlow.id)
+        .where(RawFlow.observed_at >= since)
+        .group_by(RawFlow.ticker)
+        .having(func.sum(RawFlow.premium) >= min_premium)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    out = []
+    for r in rows:
+        total_prem = float(r.total_premium or 0.0)
+        stats = TickerStats(
+            bought_premium=float(r.bought_premium or 0.0),
+            sold_premium=float(r.sold_premium or 0.0),
+            total_premium=total_prem,
+            max_vol_oi=float(r.max_vol_oi) if r.max_vol_oi is not None else None,
+            opening_prints=int(r.opening_prints or 0),
+            total_prints=int(r.total_prints or 0),
+            avg_iv_rank=float(r.avg_iv_rank) if r.avg_iv_rank is not None else None,
+            weighted_confidence=(float(r.weighted_conf_num or 0.0) / total_prem
+                                 if total_prem > 0 else 0.0),
+            distinct_contracts=int(r.distinct_contracts or 0),
+            call_premium=float(r.call_premium or 0.0),
+            put_premium=float(r.put_premium or 0.0),
+        )
+        sms = compute_smart_money(stats)
+        out.append({
+            "ticker": r.ticker,
+            "smart_money_score": sms["smart_money_score"],
+            "bullish_tilt": sms["bullish_tilt"],
+            "components": sms["components"],
+            "reasons": sms["reasons"],
+            "bought_premium": stats.bought_premium,
+            "total_premium": stats.total_premium,
+            "max_vol_oi": stats.max_vol_oi,
+            "distinct_contracts": stats.distinct_contracts,
+            "total_prints": stats.total_prints,
+            "last_seen": r.last_seen,
+        })
+    out.sort(key=lambda x: x["smart_money_score"], reverse=True)
+    return out[:limit]
