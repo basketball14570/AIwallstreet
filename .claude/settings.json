@@ -1,16 +1,8 @@
 {
   "permissions": {
     "deny": [
-      "mcp__robinhood-trading__place_order",
-      "mcp__robinhood-trading__place_market_order",
-      "mcp__robinhood-trading__place_limit_order",
-      "mcp__robinhood-trading__place_stop_order",
-      "mcp__robinhood-trading__buy",
-      "mcp__robinhood-trading__sell",
-      "mcp__robinhood-trading__submit_order",
-      "mcp__robinhood-trading__cancel_order",
-      "mcp__robinhood-trading__replace_order",
-      "mcp__robinhood-trading__modify_order"
+      "mcp__robinhood-trading__place_equity_order",
+      "mcp__robinhood-trading__cancel_equity_order"
     ]
   }
 }
